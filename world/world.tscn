@@ -1,0 +1,394 @@
+[gd_scene load_steps=5 format=3 uid="uid://cb3v3j7k0w8e4"]
+
+[ext_resource type="Script" path="res://world/world.gd" id="1_world"]
+[ext_resource type="Script" path="res://world/arena_background.gd" id="2_bg"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+content_margin_left = 12.0
+content_margin_top = 10.0
+content_margin_right = 12.0
+content_margin_bottom = 10.0
+bg_color = Color(0.08, 0.1, 0.13, 0.88)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.24, 0.32, 0.44, 0.9)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="World" type="Node2D"]
+script = ExtResource("1_world")
+
+[node name="ArenaBackground" type="Node2D" parent="."]
+script = ExtResource("2_bg")
+
+[node name="ArenaWalls" type="StaticBody2D" parent="."]
+collision_layer = 2
+collision_mask = 0
+
+[node name="FoodContainer" type="Node2D" parent="."]
+
+[node name="NPCContainer" type="Node2D" parent="."]
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(800, 500)
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="RootControl" type="Control" parent="UI"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="LeftPanelContainer" type="PanelContainer" parent="UI/RootControl"]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 16.0
+offset_right = 375.0
+offset_bottom = 540.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBox" type="VBoxContainer" parent="UI/RootControl/LeftPanelContainer"]
+layout_mode = 2
+theme_override_constants/separation = 7
+
+[node name="TitleLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.95, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "Social NPC Simulation - Stress Arena"
+
+[node name="HintLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.6, 0.72, 0.85, 1)
+theme_override_font_sizes/font_size = 11
+text = "Hover mouse over any NPC to reveal its 8 need bars!"
+
+[node name="MetricsHBox" type="HBoxContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="FPSLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/MetricsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "FPS: 60"
+
+[node name="FrameTimeLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/MetricsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.75, 0.82, 1)
+theme_override_font_sizes/font_size = 12
+text = "Frame: 16.6 ms"
+
+[node name="NPCCountLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/MetricsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.3, 0.8, 0.95, 1)
+theme_override_font_sizes/font_size = 12
+text = "NPCs: 0"
+
+[node name="DeathsLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/MetricsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.4, 0.35, 1)
+theme_override_font_sizes/font_size = 12
+text = "Starved: 0"
+
+[node name="FoodCountLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/MetricsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.72, 0.2, 1)
+theme_override_font_sizes/font_size = 12
+text = "Food: 0"
+
+[node name="HSeparator1" type="HSeparator" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="SpawnTitle" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.8, 0.85, 0.9, 1)
+theme_override_font_sizes/font_size = 12
+text = "Spawn NPCs:"
+
+[node name="SpawnGrid" type="GridContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+columns = 4
+
+[node name="Add1Btn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/SpawnGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "+1"
+
+[node name="Add10Btn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/SpawnGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "+10"
+
+[node name="Add50Btn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/SpawnGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "+50"
+
+[node name="Add200Btn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/SpawnGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "+200"
+
+[node name="ControlsHBox1" type="HBoxContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="MoveToggleBtn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/ControlsHBox1"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Movement: ON"
+
+[node name="RandNeedsBtn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/ControlsHBox1"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Randomize Needs"
+
+[node name="ControlsHBox2" type="HBoxContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="LabelsToggleBtn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/ControlsHBox2"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Labels: ON"
+
+[node name="NPCsCollideBtn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/ControlsHBox2"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "NPC Collisions: OFF"
+
+[node name="SpeedHBox" type="HBoxContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="SpeedTitle" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/SpeedHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Speed:"
+
+[node name="SpeedSlider" type="HSlider" parent="UI/RootControl/LeftPanelContainer/VBox/SpeedHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 250.0
+step = 5.0
+value = 75.0
+
+[node name="SpeedValLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/SpeedHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(55, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "75 px/s"
+
+[node name="HSeparatorFood" type="HSeparator" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="FoodTitle" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.75, 0.3, 1)
+theme_override_font_sizes/font_size = 12
+text = "Food Supply (Click Arena to Drop):"
+
+[node name="FoodPresetsGrid" type="GridContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+columns = 4
+
+[node name="Food25Btn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/FoodPresetsGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "25 pts"
+
+[node name="Food50Btn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/FoodPresetsGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "50 pts"
+
+[node name="Food100Btn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/FoodPresetsGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "100 pts"
+
+[node name="Food200Btn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/FoodPresetsGrid"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "200 pts"
+
+[node name="FoodAmountHBox" type="HBoxContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="FoodAmountTitle" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/FoodAmountHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Amount:"
+
+[node name="FoodAmountSlider" type="HSlider" parent="UI/RootControl/LeftPanelContainer/VBox/FoodAmountHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+min_value = 5.0
+max_value = 300.0
+step = 5.0
+value = 50.0
+
+[node name="FoodAmountValLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/FoodAmountHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(55, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "50 pts"
+
+[node name="FoodActionsHBox" type="HBoxContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="DropCenterFoodBtn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/FoodActionsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Drop in Center"
+
+[node name="ClearFoodBtn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/FoodActionsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Clear Food"
+
+[node name="HSeparator2" type="HSeparator" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="ResetHBox" type="HBoxContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="ResetCamBtn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/ResetHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Reset View"
+
+[node name="ClearBtn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/ResetHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Clear All"
+
+[node name="NavHelp" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.55, 0.6, 0.68, 1)
+theme_override_font_sizes/font_size = 11
+text = "• Left-Click Arena: Drop Food
+• Right-Click Drag / WASD: Pan
+• Mouse Wheel: Zoom"
+
+[node name="RightPanelContainer" type="PanelContainer" parent="UI/RootControl"]
+layout_mode = 1
+anchors_preset = 1
+anchor_left = 1.0
+anchor_right = 1.0
+offset_left = -380.0
+offset_top = 16.0
+offset_right = -16.0
+offset_bottom = 445.0
+grow_horizontal = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBox" type="VBoxContainer" parent="UI/RootControl/RightPanelContainer"]
+layout_mode = 2
+theme_override_constants/separation = 7
+
+[node name="GrowthTitleLabel" type="Label" parent="UI/RootControl/RightPanelContainer/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92, 0.95, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "Passive Need Growth Rates"
+
+[node name="GrowthHintLabel" type="Label" parent="UI/RootControl/RightPanelContainer/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.7, 0.5, 1)
+theme_override_font_sizes/font_size = 11
+text = "⚠️ If Hunger hits 100, Health drains at Hunger rate until 0!"
+
+[node name="MasterScaleHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelContainer/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="MasterTitle" type="Label" parent="UI/RootControl/RightPanelContainer/VBox/MasterScaleHBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "Master Scale:"
+
+[node name="MasterScaleSlider" type="HSlider" parent="UI/RootControl/RightPanelContainer/VBox/MasterScaleHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 5.0
+step = 0.1
+value = 1.0
+
+[node name="MasterScaleLabel" type="Label" parent="UI/RootControl/RightPanelContainer/VBox/MasterScaleHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(40, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 12
+text = "1.0x"
+
+[node name="PresetsHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelContainer/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="FreezeGrowthBtn" type="Button" parent="UI/RootControl/RightPanelContainer/VBox/PresetsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "Freeze (0/s)"
+
+[node name="DefaultGrowthBtn" type="Button" parent="UI/RootControl/RightPanelContainer/VBox/PresetsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "All 1.0/s"
+
+[node name="FastGrowthBtn" type="Button" parent="UI/RootControl/RightPanelContainer/VBox/PresetsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "All 3.0/s"
+
+[node name="HSeparator" type="HSeparator" parent="UI/RootControl/RightPanelContainer/VBox"]
+layout_mode = 2
+
+[node name="NeedSlidersVBox" type="VBoxContainer" parent="UI/RootControl/RightPanelContainer/VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 5
