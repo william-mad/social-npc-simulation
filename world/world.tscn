@@ -19,6 +19,22 @@ corner_radius_top_right = 8
 corner_radius_bottom_right = 8
 corner_radius_bottom_left = 8
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_topbar"]
+content_margin_left = 8.0
+content_margin_top = 4.0
+content_margin_right = 8.0
+content_margin_bottom = 4.0
+bg_color = Color(0.06, 0.08, 0.11, 0.88)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.24, 0.32, 0.44, 0.85)
+corner_radius_top_left = 6
+corner_radius_top_right = 6
+corner_radius_bottom_right = 6
+corner_radius_bottom_left = 6
+
 [node name="World" type="Node2D"]
 script = ExtResource("1_world")
 
@@ -48,6 +64,7 @@ grow_vertical = 2
 mouse_filter = 2
 
 [node name="LeftPanelContainer" type="PanelContainer" parent="UI/RootControl"]
+unique_name_in_owner = true
 layout_mode = 0
 offset_left = 16.0
 offset_top = 16.0
@@ -59,11 +76,22 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 layout_mode = 2
 theme_override_constants/separation = 7
 
-[node name="TitleLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox"]
+[node name="LeftHeaderHBox" type="HBoxContainer" parent="UI/RootControl/LeftPanelContainer/VBox"]
 layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/LeftHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.92, 0.95, 1, 1)
-theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/font_size = 14
 text = "Social NPC Simulation - Stress Arena"
+
+[node name="CloseLeftBtn" type="Button" parent="UI/RootControl/LeftPanelContainer/VBox/LeftHeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(24, 20)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "✕"
 
 [node name="HintLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox"]
 layout_mode = 2
@@ -305,9 +333,11 @@ theme_override_colors/font_color = Color(0.55, 0.6, 0.68, 1)
 theme_override_font_sizes/font_size = 11
 text = "• Left-Click Arena: Drop Food
 • Right-Click Drag / WASD: Pan
-• Mouse Wheel: Zoom"
+• Mouse Wheel: Zoom
+• H / Tab: Hide or Show UI"
 
 [node name="RightPanelContainer" type="PanelContainer" parent="UI/RootControl"]
+unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 1
 anchor_left = 1.0
@@ -323,11 +353,22 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 layout_mode = 2
 theme_override_constants/separation = 7
 
-[node name="GrowthTitleLabel" type="Label" parent="UI/RootControl/RightPanelContainer/VBox"]
+[node name="RightHeaderHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelContainer/VBox"]
 layout_mode = 2
+
+[node name="GrowthTitleLabel" type="Label" parent="UI/RootControl/RightPanelContainer/VBox/RightHeaderHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.92, 0.95, 1, 1)
-theme_override_font_sizes/font_size = 15
+theme_override_font_sizes/font_size = 14
 text = "Passive Need Growth Rates"
+
+[node name="CloseRightBtn" type="Button" parent="UI/RootControl/RightPanelContainer/VBox/RightHeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(24, 20)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "✕"
 
 [node name="GrowthHintLabel" type="Label" parent="UI/RootControl/RightPanelContainer/VBox"]
 layout_mode = 2
@@ -392,3 +433,38 @@ layout_mode = 2
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_constants/separation = 5
+
+[node name="TopControlsContainer" type="PanelContainer" parent="UI/RootControl"]
+layout_mode = 1
+anchors_preset = 5
+anchor_left = 0.5
+anchor_right = 0.5
+offset_left = -175.0
+offset_top = 14.0
+offset_right = 175.0
+offset_bottom = 46.0
+grow_horizontal = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_topbar")
+
+[node name="TopHBox" type="HBoxContainer" parent="UI/RootControl/TopControlsContainer"]
+layout_mode = 2
+theme_override_constants/separation = 8
+alignment = 1
+
+[node name="ToggleMenuBtn" type="Button" parent="UI/RootControl/TopControlsContainer/TopHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "☰ Hide Menu"
+
+[node name="ToggleSlidersBtn" type="Button" parent="UI/RootControl/TopControlsContainer/TopHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "⚙ Hide Sliders"
+
+[node name="ToggleAllUIBtn" type="Button" parent="UI/RootControl/TopControlsContainer/TopHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "👁 Hide All (H)"

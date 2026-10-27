@@ -40,6 +40,15 @@ const FOOD_SCENE = preload("res://food/food.tscn")
 @onready var default_growth_btn: Button = %DefaultGrowthBtn
 @onready var fast_growth_btn: Button = %FastGrowthBtn
 
+# Panels & UI Visibility Controls
+@onready var left_panel: PanelContainer = %LeftPanelContainer
+@onready var right_panel: PanelContainer = %RightPanelContainer
+@onready var toggle_menu_btn: Button = %ToggleMenuBtn
+@onready var toggle_sliders_btn: Button = %ToggleSlidersBtn
+@onready var toggle_all_ui_btn: Button = %ToggleAllUIBtn
+@onready var close_left_btn: Button = %CloseLeftBtn
+@onready var close_right_btn: Button = %CloseRightBtn
+
 # Camera dragging state
 var is_panning: bool = false
 var pan_drag_start: Vector2 = Vector2.ZERO
@@ -319,6 +328,31 @@ func set_npcs_collide(enable: bool) -> void:
 	if npcs_collide_btn:
 		npcs_collide_btn.text = "NPC Collisions: ON" if enable else "NPC Collisions: OFF"
 
+func set_left_panel_visible(vis: bool) -> void:
+	if left_panel:
+		left_panel.visible = vis
+	if toggle_menu_btn:
+		toggle_menu_btn.text = "☰ Hide Menu" if vis else "☰ Show Menu"
+	_update_toggle_all_button_text()
+
+func set_right_panel_visible(vis: bool) -> void:
+	if right_panel:
+		right_panel.visible = vis
+	if toggle_sliders_btn:
+		toggle_sliders_btn.text = "⚙ Hide Sliders" if vis else "⚙ Show Sliders"
+	_update_toggle_all_button_text()
+
+func toggle_all_ui() -> void:
+	var any_visible: bool = (left_panel and left_panel.visible) or (right_panel and right_panel.visible)
+	var new_state: bool = not any_visible
+	set_left_panel_visible(new_state)
+	set_right_panel_visible(new_state)
+
+func _update_toggle_all_button_text() -> void:
+	if toggle_all_ui_btn:
+		var any_visible: bool = (left_panel and left_panel.visible) or (right_panel and right_panel.visible)
+		toggle_all_ui_btn.text = "👁 Hide All (H)" if any_visible else "👁 Show All (H)"
+
 # ==============================================================================
 # ARENA WALLS & SETUP
 # ==============================================================================
@@ -378,6 +412,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and is_panning:
 		var delta_pos = (event.position - pan_drag_start) / camera.zoom.x
 		camera.position = camera_pan_start - delta_pos
+
+	elif event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_H or event.keycode == KEY_TAB:
+			toggle_all_ui()
 
 func _zoom_camera(factor: float) -> void:
 	var prev_zoom = camera.zoom
@@ -478,6 +516,20 @@ func _connect_ui_signals() -> void:
 
 	if fast_growth_btn:
 		fast_growth_btn.pressed.connect(func(): set_all_growth_rates(3.0))
+
+	# Panel Visibility toggles
+	if toggle_menu_btn:
+		toggle_menu_btn.pressed.connect(func(): set_left_panel_visible(not (left_panel and left_panel.visible)))
+	if close_left_btn:
+		close_left_btn.pressed.connect(func(): set_left_panel_visible(false))
+
+	if toggle_sliders_btn:
+		toggle_sliders_btn.pressed.connect(func(): set_right_panel_visible(not (right_panel and right_panel.visible)))
+	if close_right_btn:
+		close_right_btn.pressed.connect(func(): set_right_panel_visible(false))
+
+	if toggle_all_ui_btn:
+		toggle_all_ui_btn.pressed.connect(toggle_all_ui)
 
 func _on_speed_slider_changed(value: float) -> void:
 	current_speed = value
