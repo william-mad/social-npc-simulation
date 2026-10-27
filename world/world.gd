@@ -267,10 +267,11 @@ func spawn_single_npc(pos: Vector2 = Vector2.ZERO, randomize_values: bool = true
 		spawn_food(forage_pos.clamp(Vector2(40, 40), arena_size - Vector2(40, 40)), amt)
 	)
 
+	npc_container.add_child(npc)
+
 	if randomize_values:
 		npc.randomize_needs()
 
-	npc_container.add_child(npc)
 	return npc
 
 func _on_npc_died(_npc: NPC) -> void:
