@@ -261,8 +261,11 @@ func spawn_single_npc(pos: Vector2 = Vector2.ZERO, randomize_values: bool = true
 	for prop in growth_rates:
 		npc.set_need_rate(prop, growth_rates[prop] * master_growth_multiplier)
 
-	# Connect death signal
+	# Connect death & Purpose foraging signals
 	npc.died.connect(_on_npc_died)
+	npc.foraging_completed.connect(func(forage_pos: Vector2, amt: float):
+		spawn_food(forage_pos.clamp(Vector2(40, 40), arena_size - Vector2(40, 40)), amt)
+	)
 
 	if randomize_values:
 		npc.randomize_needs()

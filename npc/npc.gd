@@ -4,8 +4,10 @@ extends CharacterBody2D
 ## Signals
 signal hover_changed(is_hovered: bool)
 signal died(npc: NPC)
+signal foraging_completed(forage_pos: Vector2, amt: float)
 
 const HUNGRY_THRESHOLD: float = 40.0
+const PURPOSE_THRESHOLD: float = 50.0
 
 # ==============================================================================
 # HEALTH (0 to 100)
@@ -75,7 +77,7 @@ const HUNGRY_THRESHOLD: float = 40.0
 @export_range(0.0, 100.0) var purpose: float = 70.0:
 	set(v):
 		purpose = clampf(v, 0.0, 100.0)
-		if is_mouse_hovered:
+		if is_mouse_hovered or is_foraging or purpose >= PURPOSE_THRESHOLD:
 			queue_redraw()
 
 @export_range(0.0, 100.0) var fight: float = 15.0:
@@ -220,6 +222,9 @@ const NEED_DEFINITIONS: Array[Dictionary] = [
 
 var is_mouse_hovered: bool = false
 var is_dead: bool = false
+var is_foraging: bool = false
+var forage_timer: float = 0.0
+var forage_cooldown: float = 0.0
 var wander_timer: float = 0.0
 var wander_direction: Vector2 = Vector2.ZERO
 var arena_bounds: Rect2 = Rect2()
@@ -246,6 +251,10 @@ func _update_collision_shape() -> void:
 ## Returns true if hunger >= 40.0
 func is_hungry() -> bool:
 	return hunger >= HUNGRY_THRESHOLD
+
+## Returns true if purpose >= 50.0 and ready to forage
+func has_purpose_to_forage() -> bool:
+	return purpose >= PURPOSE_THRESHOLD and not is_foraging and forage_cooldown <= 0.0
 
 func _process(delta: float) -> void:
 	if is_dead:
@@ -293,7 +302,15 @@ func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 
+	if forage_cooldown > 0.0:
+		forage_cooldown = maxf(forage_cooldown - delta, 0.0)
+
 	if can_move and not (pause_on_hover and is_mouse_hovered):
+		# If actively foraging, process foraging progress
+		if is_foraging:
+			_process_foraging(delta)
+			return
+
 		# "if hunger >= 40 the npc is hungry. add the capacity to path towards food if hungry"
 		if is_hungry():
 			var target_food = _find_nearest_food()
@@ -301,8 +318,48 @@ func _physics_process(delta: float) -> void:
 				_path_towards_food(target_food)
 				return
 
+		# Purpose foraging: NPCs with high Purpose search/forage for food in the arena
+		if has_purpose_to_forage():
+			_start_foraging()
+			return
+
 		# Regular wander if not hungry or no food available
 		_handle_movement(delta)
+
+## Begins foraging action
+func _start_foraging() -> void:
+	is_foraging = true
+	forage_timer = randf_range(1.5, 2.5)
+	wander_direction = Vector2.from_angle(randf() * TAU)
+	queue_redraw()
+
+## Updates ongoing foraging action
+func _process_foraging(delta: float) -> void:
+	forage_timer -= delta
+	velocity = wander_direction * (move_speed * 0.25)
+	move_and_slide()
+
+	if forage_timer <= 0.0:
+		_complete_foraging()
+
+## Completes foraging: fulfills purpose and drops new food
+func _complete_foraging() -> void:
+	is_foraging = false
+	forage_cooldown = randf_range(2.0, 5.0)
+	var food_yield: float = randf_range(25.0, 45.0)
+
+	# Fulfill purpose need
+	purpose = clampf(purpose - 35.0, 0.0, 100.0)
+
+	# Emit foraging completion signal to spawn food
+	foraging_completed.emit(global_position, food_yield)
+
+	# Satisfaction pop tween
+	var tw = create_tween()
+	tw.tween_property(self, "scale", Vector2(1.18, 0.88), 0.08).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property(self, "scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_BACK)
+
+	queue_redraw()
 
 ## Finds the nearest active food in the world
 func _find_nearest_food() -> Food:
@@ -430,6 +487,7 @@ func die() -> void:
 	if is_dead:
 		return
 	is_dead = true
+	is_foraging = false
 	died.emit(self)
 
 	# Disable physics, movement, and interaction immediately
@@ -493,15 +551,22 @@ func _draw() -> void:
 	# Inner button ridge / tactile bevel
 	draw_circle(Vector2.ZERO, body_radius * 0.65, body_color.lightened(0.12))
 
-	# Circle border (glows amber if hungry and unhovered)
-	if is_hungry() and not is_mouse_hovered:
+	# Circle border (glows emerald if foraging, amber if hungry and unhovered)
+	if is_foraging and not is_mouse_hovered:
+		var forage_glow = Color(0.22, 0.85, 0.45, 0.9)
+		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, forage_glow, active_width + 1.0, true)
+	elif is_hungry() and not is_mouse_hovered:
 		var hungry_glow = Color(0.98, 0.52, 0.12, 0.85)
 		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, hungry_glow, active_width + 0.5, true)
 	else:
 		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, active_outline, active_width, true)
 
-	# Center button pip (orange when hungry)
-	var pip_color = Color(0.98, 0.52, 0.12) if is_hungry() else active_outline
+	# Center button pip (green when foraging, orange when hungry)
+	var pip_color = active_outline
+	if is_foraging:
+		pip_color = Color(0.22, 0.85, 0.45)
+	elif is_hungry():
+		pip_color = Color(0.98, 0.52, 0.12)
 	draw_circle(Vector2.ZERO, 3.0, pip_color)
 
 	# 2. Draw the 8 radial bars ONLY if mouse is over the NPC and NPC is not dead
@@ -589,6 +654,8 @@ func _draw_bars() -> void:
 			var text: String = "%s: %d" % [need["name"], int(round(val))]
 			if need["prop"] == "hunger" and val >= HUNGRY_THRESHOLD:
 				text = "%s: %d (HUNGRY)" % [need["name"], int(round(val))]
+			elif need["prop"] == "purpose" and is_foraging:
+				text = "%s: %d (FORAGING)" % [need["name"], int(round(val))]
 
 			var font_size: int = 10
 			var str_size: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
