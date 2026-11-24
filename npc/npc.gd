@@ -4,15 +4,9 @@ extends CharacterBody2D
 ## Signals
 signal hover_changed(is_hovered: bool)
 signal died(npc: NPC)
+signal foraging_completed(pos: Vector2, amount: float)
 
 const HUNGRY_THRESHOLD: float = 40.0
-<<<<<<< Updated upstream
-
-# ==============================================================================
-# HEALTH (0 to 100)
-# Starts at 100. If hunger reaches 100, health depletes at hunger increase rate.
-# If health reaches 0, the NPC dies and fades away.
-=======
 const SLEEP_COLLAPSE_THRESHOLD: float = 88.0
 const TIRED_COLLAPSE_THRESHOLD: float = 90.0
 const SLEEP_URGENT_SEEK_THRESHOLD: float = 70.0
@@ -83,7 +77,6 @@ var _gender_assigned: bool = false
 
 # ==============================================================================
 # HEALTH & INDIVIDUAL STATS
->>>>>>> Stashed changes
 # ==============================================================================
 @export_group("Health")
 @export_range(20.0, 300.0) var max_health: float = 100.0:
@@ -113,15 +106,6 @@ var _gender_assigned: bool = false
 
 # ==============================================================================
 # 8 NEEDS (0 to 100)
-# User specification:
-# 1 = hunger 0-100   -> bar up (Vector2.UP) [Hungry at >= 40, depletes health at 100]
-# 2 = sleep need     -> bar northeast (Vector2(1, -1).normalized())
-# 3 = talk need      -> bar right (Vector2.RIGHT)
-# 4 = tired          -> bar southeast (Vector2(1, 1).normalized())
-# 5 = boredom        -> bar down (Vector2.DOWN)
-# 6 = lust           -> bar southwest (Vector2(-1, 1).normalized())
-# 7 = purpose        -> bar left (Vector2.LEFT)
-# 8 = fight          -> bar northwest (Vector2(-1, -1).normalized())
 # ==============================================================================
 @export_group("Needs (0-100)")
 @export_range(0.0, 100.0) var hunger: float = 80.0:
@@ -166,15 +150,14 @@ var _gender_assigned: bool = false
 		if is_mouse_hovered:
 			queue_redraw()
 
-@export_range(0.0, 100.0) var fight: float = 15.0:
+@export_range(0.0, 100.0) var anger: float = 15.0:
 	set(v):
-		fight = clampf(v, 0.0, 100.0)
+		anger = clampf(v, 0.0, 100.0)
 		if is_mouse_hovered:
 			queue_redraw()
 
 # ==============================================================================
-# PASSIVE GROWTH RATES (pts/sec)
-# Controls how each need increases (or decreases) passively over time.
+# PASSIVE GROWTH RATES (pts/sec: -5.0 to +15.0)
 # ==============================================================================
 @export_group("Passive Growth Rates (pts/sec)")
 @export var passive_growth_enabled: bool = true
@@ -185,7 +168,26 @@ var _gender_assigned: bool = false
 @export var boredom_rate: float = 1.0
 @export var lust_rate: float = 1.0
 @export var purpose_rate: float = 1.0
-@export var fight_rate: float = 1.0
+@export var anger_rate: float = 1.0
+
+# Max-need (100) penalty rates (pts/sec)
+@export_group("Max-Need Penalty Rates (pts/sec)")
+@export var max_hunger_health_drain_rate: float = 1.0
+@export var max_boredom_anger_rate: float = 2.0
+@export var max_purpose_anger_rate: float = 2.0
+@export var max_tired_anger_rate: float = 2.0
+
+# Gender multipliers & romance initiation rule
+var gender_scale_multiplier: float = 1.0
+var gender_need_multipliers: Dictionary = {
+	"hunger": 1.0, "sleep_need": 1.0, "talk_need": 1.0, "tired": 1.0,
+	"boredom": 1.0, "lust": 1.0, "purpose": 1.0, "anger": 1.0
+}
+var romance_initiator_mode: RomanceInitiator = RomanceInitiator.BOTH
+
+# Growth rates applied while in NPCState.SLEEPING or NPCState.IN_RECREATION (pts/sec)
+var sleeping_growth_rates: Dictionary = DEFAULT_SLEEPING_RATES.duplicate()
+var recreation_growth_rates: Dictionary = DEFAULT_RECREATION_RATES.duplicate()
 
 # ==============================================================================
 # VISUAL CONFIGURATION
@@ -298,15 +300,150 @@ const NEED_DEFINITIONS: Array[Dictionary] = [
 	},
 	{
 		"id": 8,
-		"name": "Fight",
-		"prop": "fight",
-		"rate_prop": "fight_rate",
+		"name": "Anger",
+		"prop": "anger",
+		"rate_prop": "anger_rate",
 		"dir": Vector2(-0.70710678, -0.70710678), # NORTHWEST (10:30)
 		"color": Color(0.92, 0.2, 0.2) # Crimson Red
 	}
 ]
 
+# ==============================================================================
+# PERSONALITY ARCHETYPES & BRANCHING STATE MACHINE
+# ==============================================================================
+enum NPCState {
+	WANDER,
+	SEEKING_FOOD,
+	SEEKING_SLEEP_SPOT,
+	SLEEPING,
+	SEEKING_RECREATION,
+	IN_RECREATION,
+	SEEKING_SOCIAL,
+	IN_CONVERSATION,
+	PURSUING_PURPOSE,
+	RELIEVING_BOREDOM,
+	ATTACKING,
+	FLEEING
+}
+
+enum AttackPhase {
+	CHASE,
+	WINDUP,
+	LUNGE,
+	RECOIL
+}
+
+const PERSONALITY_ARCHETYPES: Array[Dictionary] = [
+	{
+		"name": "Hot-Head",
+		"tint": Color(0.95, 0.32, 0.32),
+		"weights": {"hunger": 1.0, "sleep_need": 0.85, "talk_need": 0.9, "tired": 0.8, "boredom": 1.3, "lust": 1.0, "purpose": 0.8, "anger": 1.75},
+		"anger_c": 0.34, "lust_c": 0.55
+	},
+	{
+		"name": "Romantic",
+		"tint": Color(0.95, 0.42, 0.68),
+		"weights": {"hunger": 0.9, "sleep_need": 0.9, "talk_need": 1.35, "tired": 1.0, "boredom": 1.2, "lust": 1.75, "purpose": 0.75, "anger": 0.5},
+		"anger_c": 0.72, "lust_c": 0.32
+	},
+	{
+		"name": "Chatterbox",
+		"tint": Color(0.25, 0.85, 0.92),
+		"weights": {"hunger": 0.95, "sleep_need": 0.9, "talk_need": 1.8, "tired": 0.9, "boredom": 1.4, "lust": 1.1, "purpose": 0.85, "anger": 0.65},
+		"anger_c": 0.65, "lust_c": 0.48
+	},
+	{
+		"name": "Workaholic",
+		"tint": Color(0.28, 0.88, 0.52),
+		"weights": {"hunger": 0.85, "sleep_need": 0.75, "talk_need": 0.7, "tired": 0.75, "boredom": 0.6, "lust": 0.6, "purpose": 1.85, "anger": 0.9},
+		"anger_c": 0.58, "lust_c": 0.65
+	},
+	{
+		"name": "Glutton",
+		"tint": Color(0.98, 0.62, 0.22),
+		"weights": {"hunger": 1.8, "sleep_need": 1.2, "talk_need": 0.9, "tired": 1.25, "boredom": 1.1, "lust": 0.85, "purpose": 0.7, "anger": 0.85},
+		"anger_c": 0.55, "lust_c": 0.55
+	},
+	{
+		"name": "Sloth",
+		"tint": Color(0.58, 0.48, 0.92),
+		"weights": {"hunger": 1.0, "sleep_need": 1.75, "talk_need": 0.75, "tired": 1.7, "boredom": 0.7, "lust": 0.7, "purpose": 0.55, "anger": 0.45},
+		"anger_c": 0.78, "lust_c": 0.65
+	},
+	{
+		"name": "Hedonist",
+		"tint": Color(0.96, 0.78, 0.22),
+		"weights": {"hunger": 1.2, "sleep_need": 0.9, "talk_need": 1.3, "tired": 0.95, "boredom": 1.75, "lust": 1.5, "purpose": 0.5, "anger": 1.1},
+		"anger_c": 0.48, "lust_c": 0.36
+	},
+	{
+		"name": "Balanced",
+		"tint": Color(0.75, 0.82, 0.9),
+		"weights": {"hunger": 1.0, "sleep_need": 1.0, "talk_need": 1.0, "tired": 1.0, "boredom": 1.0, "lust": 1.0, "purpose": 1.0, "anger": 1.0},
+		"anger_c": 0.52, "lust_c": 0.52
+	}
+]
+
+var personality_name: String = "Balanced"
+var personality_tint: Color = Color(0.85, 0.88, 0.92)
+var personality_weights: Dictionary = {
+	"hunger": 1.0, "sleep_need": 1.0, "talk_need": 1.0, "tired": 1.0,
+	"boredom": 1.0, "lust": 1.0, "purpose": 1.0, "anger": 1.0
+}
+var anger_threshold: float = 0.52
+var lust_threshold: float = 0.52
+
+# State machine & branching variables
+var current_state: NPCState = NPCState.WANDER
+var state_label_text: String = "Wandering"
+var decision_timer: float = 0.0
+var purpose_target: Vector2 = Vector2.ZERO
+var purpose_progress: float = 0.0
+var boredom_branch: String = "Spin"
+var orbit_angle: float = 0.0
+var flee_target: NPC = null
+var flee_timer: float = 0.0
+
+# Non-contractual headbutt combat & knockback state
+var attack_target: NPC = null
+var attack_phase: AttackPhase = AttackPhase.CHASE
+var attack_phase_timer: float = 0.0
+var strike_cooldown: float = 0.0
+var attack_cooldown: float = 0.0
+var lunge_dir: Vector2 = Vector2.RIGHT
+var lunge_hit_landed: bool = false
+var knockback_velocity: Vector2 = Vector2.ZERO
+var hit_flash_timer: float = 0.0
+var impact_fx_timer: float = 0.0
+var impact_fx_world_pos: Vector2 = Vector2.ZERO
+var floating_popups: Array[Dictionary] = []
+
+# Sleep spot state
+var target_sleep_spot: SleepSpot = null
+var in_sleep_spot: bool = false
+
+# Recreation spot state
+var target_recreation_spot: RecreationSpot = null
+var in_recreation_spot: bool = false
+var recreation_sway_time: float = 0.0
+
+# Social / Dyadic Conversation state (Talk / Lust / Anger Averaging Engine)
+var social_partner: NPC = null
+var social_cooldown: float = 0.0
+var conversation_timer: float = 0.0
+var conversation_topic: String = ""
+var conversation_branch: String = "" # "MUTUAL", "REJECTED", "BRAWL"
+var conversation_value_rate: float = 0.0 # Mapped to [-5.0, +15.0] pts/s scale
+var conversation_color: Color = Color.CYAN
+var affinities: Dictionary = {} # instance_id -> float [-100.0, 100.0]
+var recent_memories: Array[String] = [] # Bounded 8-slot memory log
+
 var is_mouse_hovered: bool = false
+var is_selected: bool = false:
+	set(v):
+		if is_selected != v:
+			is_selected = v
+			queue_redraw()
 var is_dead: bool = false
 var wander_timer: float = 0.0
 var wander_direction: Vector2 = Vector2.ZERO
@@ -315,17 +452,46 @@ var arena_bounds: Rect2 = Rect2()
 @onready var collision_shape: CollisionShape2D = get_node_or_null("CollisionShape2D")
 
 func _ready() -> void:
+	add_to_group("npcs")
 	input_pickable = true
 	collision_layer = 1
 	collision_mask = (1 | 2) if collide_with_npcs else 2
 	_update_collision_shape()
 
-	# If isolated scene run directly (as root child), center it in window
 	if get_parent() == get_tree().root:
 		global_position = get_viewport_rect().size * 0.5
 
-	# Initialize random wander
+	if not _gender_assigned:
+		assign_random_gender()
+	if npc_number <= 0:
+		npc_number = 1
+
+	assign_random_personality()
 	_pick_new_wander()
+	_pick_new_purpose_target()
+
+func assign_random_gender() -> void:
+	gender = Gender.MALE if (randi() % 2 == 0) else Gender.FEMALE
+
+func can_initiate_romance() -> bool:
+	match romance_initiator_mode:
+		RomanceInitiator.MALE_ONLY:
+			return gender == Gender.MALE
+		RomanceInitiator.FEMALE_ONLY:
+			return gender == Gender.FEMALE
+		_:
+			return true
+
+func set_gender_need_multiplier(prop_name: String, mult: float) -> void:
+	gender_need_multipliers[prop_name] = maxf(mult, 0.0)
+
+func set_gender_multipliers(scale_mult: float, per_need: Dictionary) -> void:
+	gender_scale_multiplier = maxf(scale_mult, 0.0)
+	for k in per_need:
+		gender_need_multipliers[k] = maxf(float(per_need[k]), 0.0)
+
+func get_display_name() -> String:
+	return "#%d" % npc_number
 
 func get_effective_move_speed() -> float:
 	return move_speed * speed_multiplier
@@ -334,8 +500,6 @@ func _update_collision_shape() -> void:
 	if collision_shape and collision_shape.shape is CircleShape2D:
 		(collision_shape.shape as CircleShape2D).radius = body_radius
 
-<<<<<<< Updated upstream
-=======
 ## Assigns one of the 8 Personality Archetypes with slight individual jitter
 func assign_random_personality() -> void:
 	var arch: Dictionary = PERSONALITY_ARCHETYPES[randi() % PERSONALITY_ARCHETYPES.size()]
@@ -357,33 +521,104 @@ func add_memory(mem_text: String) -> void:
 		recent_memories.pop_front()
 	recent_memories.append(mem_text)
 
->>>>>>> Stashed changes
 ## Returns true if hunger >= 40.0
 func is_hungry() -> bool:
 	return hunger >= HUNGRY_THRESHOLD
+
+# ==============================================================================
+# INFINITE AXIS UTILITY SYSTEM (IAUS) RESPONSE CURVES
+# Combines 0-100 tank and -5.0..+15.0 pts/s rate into a [0.0, 1.0] Utility Score
+# ==============================================================================
+func get_drive_utility(prop: String) -> float:
+	var val: float = get(prop)
+	var rate_prop: String = prop + "_rate"
+	var rate: float = get(rate_prop) if (rate_prop in self) else 1.0
+
+	# Normalize tank [0, 100] -> [0, 1] and rate [-5, +15] -> [0, 1]
+	var norm_tank: float = clampf(val / 100.0, 0.0, 1.0)
+	var norm_rate: float = clampf((rate + 5.0) / 20.0, 0.0, 1.0)
+
+	# Blend accumulated state with immediate rate shock
+	var x: float
+	if prop == "anger":
+		x = clampf(norm_tank + maxf(0.0, norm_rate - 0.3) * 0.35, 0.0, 1.0)
+	else:
+		var alpha: float = 0.65 if (prop in ["lust", "tired"]) else 0.85
+		x = clampf(alpha * norm_tank + (1.0 - alpha) * norm_rate, 0.0, 1.0)
+
+	var u: float = x
+	match prop:
+		"hunger":
+			# Cubic survival curve (accelerates sharply above 40-70%)
+			u = pow(x, 2.2) if val < 40.0 else pow(x, 1.35)
+		"sleep_need":
+			u = pow(x, 2.6)
+		"tired":
+			u = pow(x, 2.1)
+		"anger":
+			# Logistic Sigmoid curve governed by personality anger_threshold
+			u = 1.0 / (1.0 + exp(-12.0 * (x - anger_threshold)))
+		"lust":
+			# Logistic Sigmoid curve governed by personality lust_threshold
+			u = 1.0 / (1.0 + exp(-11.0 * (x - lust_threshold)))
+		"talk_need":
+			u = pow(x, 1.15)
+		"purpose":
+			u = pow(x, 0.95)
+		"boredom":
+			u = pow(x, 1.6)
+
+	var w: float = personality_weights.get(prop, 1.0)
+	return clampf(u * (0.65 + 0.35 * w), 0.0, 1.25)
 
 func _process(delta: float) -> void:
 	if is_dead:
 		return
 
+	if social_cooldown > 0.0:
+		social_cooldown = maxf(0.0, social_cooldown - delta)
+	if attack_cooldown > 0.0:
+		attack_cooldown = maxf(0.0, attack_cooldown - delta)
+	if strike_cooldown > 0.0:
+		strike_cooldown = maxf(0.0, strike_cooldown - delta)
+
+	var fx_active: bool = false
+	if hit_flash_timer > 0.0:
+		hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
+		fx_active = true
+	if impact_fx_timer > 0.0:
+		impact_fx_timer = maxf(0.0, impact_fx_timer - delta)
+		fx_active = true
+	if not floating_popups.is_empty():
+		var i: int = floating_popups.size() - 1
+		while i >= 0:
+			var p: Dictionary = floating_popups[i]
+			p["life"] = float(p["life"]) - delta
+			p["pos"] = (p["pos"] as Vector2) + (p["vel"] as Vector2) * delta
+			if float(p["life"]) <= 0.0:
+				floating_popups.remove_at(i)
+			i -= 1
+		fx_active = true
+
 	if passive_growth_enabled:
 		_process_passive_growth(delta)
 
+	if fx_active:
+		queue_redraw()
+
 	_check_mouse_hover()
-	# Draw on top of other NPCs when hovered
-	z_index = 100 if is_mouse_hovered else 0
+	if is_selected:
+		queue_redraw()
+	z_index = 100 if is_mouse_hovered else (90 if is_selected else 0)
 
 func _process_passive_growth(delta: float) -> void:
 	if is_dead:
 		return
 
+	var sleeping_now: bool = (current_state == NPCState.SLEEPING)
+	var recreating_now: bool = (current_state == NPCState.IN_RECREATION)
 	var needs_redraw: bool = false
 	for need in NEED_DEFINITIONS:
-<<<<<<< Updated upstream
-		var rate: float = get(need["rate_prop"])
-		if rate != 0.0:
-			var prop: String = need["prop"]
-=======
 		var prop: String = need["prop"]
 		var rate: float
 		if sleeping_now:
@@ -398,21 +633,13 @@ func _process_passive_growth(delta: float) -> void:
 		var effective_rate: float = rate * (p_weight * g_mult if rate > 0.0 else 1.0)
 
 		if effective_rate != 0.0:
->>>>>>> Stashed changes
 			var cur_val: float = get(prop)
-			var new_val: float = clampf(cur_val + rate * delta, 0.0, 100.0)
+			var new_val: float = clampf(cur_val + effective_rate * delta, 0.0, 100.0)
 			if new_val != cur_val:
 				set(prop, new_val)
 				if is_mouse_hovered or (prop == "hunger" and new_val >= 40.0):
 					needs_redraw = true
 
-<<<<<<< Updated upstream
-	# Health depletion from hunger starvation:
-	# "if hunger reaches 100, the health bar starts being depleted at hunger increase rate. if health reaches 0 they die."
-	if hunger >= 100.0 and hunger_rate > 0.0:
-		var health_loss: float = hunger_rate * delta
-		var new_health: float = clampf(health - health_loss, 0.0, 100.0)
-=======
 	# Max Boredom (100) raises Anger
 	if boredom >= 100.0 and max_boredom_anger_rate > 0.0:
 		var anger_from_boredom: float = clampf(anger + max_boredom_anger_rate * delta, 0.0, 100.0)
@@ -448,7 +675,6 @@ func _process_passive_growth(delta: float) -> void:
 	if hunger >= 100.0 and max_hunger_health_drain_rate > 0.0:
 		var health_loss: float = max_hunger_health_drain_rate * delta
 		var new_health: float = clampf(health - health_loss, 0.0, max_health)
->>>>>>> Stashed changes
 		if new_health != health:
 			health = new_health
 			needs_redraw = true
@@ -456,24 +682,91 @@ func _process_passive_growth(delta: float) -> void:
 			die()
 			return
 
-	if needs_redraw:
+	if needs_redraw or current_state == NPCState.IN_CONVERSATION:
 		queue_redraw()
 
+# ==============================================================================
+# CORE AI LOOP & PRIORITY BUCKETING
+# ==============================================================================
 func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 
-	if can_move and not (pause_on_hover and is_mouse_hovered):
-		# "if hunger >= 40 the npc is hungry. add the capacity to path towards food if hungry"
-		if is_hungry():
-			var target_food = _find_nearest_food()
-<<<<<<< Updated upstream
-			if target_food != null:
-				_path_towards_food(target_food)
-				return
+	if not can_move or (pause_on_hover and is_mouse_hovered):
+		return
 
-		# Regular wander if not hungry or no food available
-=======
+	# Apply any active physical knockback impulse first
+	if knockback_velocity.length_squared() > 4.0:
+		velocity = knockback_velocity
+		move_and_slide()
+		_enforce_arena_bounds()
+		knockback_velocity = knockback_velocity.move_toward(Vector2.ZERO, 880.0 * delta)
+		if knockback_velocity.length() > 90.0:
+			return
+	else:
+		knockback_velocity = Vector2.ZERO
+
+	# 1. If actively attacking (headbutting) a target, process physical combat
+	if current_state == NPCState.ATTACKING:
+		_process_attacking(delta)
+		return
+
+	# 1b. If locked in an active dyadic conversation, process it
+	if current_state == NPCState.IN_CONVERSATION:
+		_process_active_conversation(delta)
+		return
+
+	# 2. If actively fleeing an attacker
+	if current_state == NPCState.FLEEING:
+		_process_fleeing(delta)
+		return
+
+	# 3. If sleeping, continue until rested (unless starving emergency)
+	if current_state == NPCState.SLEEPING:
+		if hunger >= 92.0 and _find_nearest_food() != null:
+			_release_sleep_spot()
+			current_state = NPCState.SEEKING_FOOD
+			state_label_text = "Starving! Seeking Food"
+		else:
+			_process_sleeping(delta)
+			return
+
+	# 3b. If relaxing in a recreation spot, continue until entertained (unless survival/anger emergency)
+	if current_state == NPCState.IN_RECREATION:
+		if hunger >= 60.0 and _find_nearest_food() != null:
+			_release_recreation_spot()
+			current_state = NPCState.SEEKING_FOOD
+			state_label_text = "Seeking Food"
+		elif sleep_need >= SLEEP_COLLAPSE_THRESHOLD or tired >= TIRED_COLLAPSE_THRESHOLD:
+			_release_recreation_spot()
+			current_state = NPCState.SLEEPING
+			state_label_text = "Collapsed (Sleeping)"
+			return
+		elif (sleep_need >= SLEEP_URGENT_SEEK_THRESHOLD or tired >= TIRED_URGENT_SEEK_THRESHOLD) and _find_nearest_sleep_spot() != null:
+			_release_recreation_spot()
+			current_state = NPCState.SEEKING_SLEEP_SPOT
+			state_label_text = "Seeking Sleep Spot!"
+		elif anger >= 85.0 and attack_cooldown <= 0.0:
+			var target: NPC = _find_attack_target()
+			if target != null:
+				start_attack(target)
+				return
+			_process_in_recreation(delta)
+			return
+		else:
+			_process_in_recreation(delta)
+			return
+
+	# 4. Evaluate Utility Brain periodically to pick winning directive
+	decision_timer -= delta
+	if decision_timer <= 0.0:
+		decision_timer = randf_range(0.35, 0.65)
+		_evaluate_utility_brain()
+
+	# 5. Execute active state branch
+	match current_state:
+		NPCState.SEEKING_FOOD:
+			var target_food = _find_nearest_food()
 			if target_food != null and hunger >= 20.0:
 				_path_towards_food(target_food, delta)
 			else:
@@ -1175,12 +1468,9 @@ func _process_social_seeking(delta: float) -> void:
 
 	if social_partner == null:
 		# Nobody available right now; wander and burn a tiny bit of restlessness
->>>>>>> Stashed changes
 		_handle_movement(delta)
+		return
 
-<<<<<<< Updated upstream
-## Finds the nearest active food in the world
-=======
 	var to_partner: Vector2 = social_partner.global_position - global_position
 	var dist: float = to_partner.length()
 	var social_range: float = body_radius + social_partner.body_radius + 26.0
@@ -1395,9 +1685,13 @@ func _end_conversation() -> void:
 # ==============================================================================
 # FOOD SEEKING & CONSUMPTION
 # ==============================================================================
->>>>>>> Stashed changes
 func _find_nearest_food() -> Food:
-	var foods = get_tree().get_nodes_in_group("food")
+	if not is_inside_tree():
+		return null
+	var tree = get_tree()
+	if tree == null:
+		return null
+	var foods = tree.get_nodes_in_group("food")
 	if foods.is_empty():
 		return null
 
@@ -1413,33 +1707,24 @@ func _find_nearest_food() -> Food:
 
 	return nearest
 
-## Steers towards target food and eats it when within contact range
-func _path_towards_food(target_food: Food) -> void:
+func _path_towards_food(target_food: Food, _delta: float) -> void:
 	var to_food: Vector2 = target_food.global_position - global_position
 	var dist: float = to_food.length()
 	var eat_range: float = body_radius + target_food.radius + 6.0
 
 	if dist <= eat_range:
-		# In eating range: consume food
 		_eat_food(target_food)
 		velocity = Vector2.ZERO
 	else:
-		# Seek food directly
 		var seek_dir = to_food.normalized()
-<<<<<<< Updated upstream
-		velocity = seek_dir * (move_speed * 1.25)
-=======
 		# Branch: Aggressive NPCs sprint faster toward food; exhausted NPCs trudge
 		var speed_mult: float = 1.45 if anger >= 60.0 else (0.85 if tired >= 75.0 else 1.25)
 		velocity = seek_dir * (get_effective_move_speed() * speed_mult)
->>>>>>> Stashed changes
 		var collided = move_and_slide()
 		if collided and get_slide_collision_count() > 0:
 			var col = get_slide_collision(0)
 			wander_direction = wander_direction.bounce(col.get_normal()).normalized()
 
-## Consumes food from the target food source
-## "the amount of food spent by an npc is equal to the amount of hunger it has."
 func _eat_food(target_food: Food) -> void:
 	if not is_instance_valid(target_food) or target_food.is_depleted or target_food.amount <= 0.0:
 		return
@@ -1450,14 +1735,18 @@ func _eat_food(target_food: Food) -> void:
 
 	var spent: float = target_food.consume(needed_food)
 	hunger = clampf(hunger - spent, 0.0, 100.0)
+	add_memory("Ate %d pts of food" % int(round(spent)))
 
-	# Quick satisfaction scale pulse
 	var tw = create_tween()
 	tw.tween_property(self, "scale", Vector2(1.15, 0.88), 0.08).set_trans(Tween.TRANS_QUAD)
 	tw.tween_property(self, "scale", Vector2.ONE, 0.12).set_trans(Tween.TRANS_BACK)
 
+	_evaluate_utility_brain()
 	queue_redraw()
 
+# ==============================================================================
+# HOVER & BASE MOVEMENT
+# ==============================================================================
 func _check_mouse_hover() -> void:
 	if is_dead:
 		return
@@ -1465,7 +1754,6 @@ func _check_mouse_hover() -> void:
 	var mouse_pos = get_global_mouse_position()
 	var dist_sq = global_position.distance_squared_to(mouse_pos)
 
-	# Hover over body opens bars. While open, cursor staying within bars keeps them visible.
 	var max_r: float = body_radius
 	if is_mouse_hovered:
 		max_r = body_radius + bar_gap + bar_length + (32.0 if show_labels else 6.0)
@@ -1487,130 +1775,230 @@ func _handle_movement(delta: float) -> void:
 		var col = get_slide_collision(0)
 		wander_direction = wander_direction.bounce(col.get_normal()).normalized()
 
-	# Bounce off screen / arena bounds if configured
-	if bounce_screen_bounds:
-		var bounds = arena_bounds if arena_bounds.size != Vector2.ZERO else get_viewport_rect()
-		var margin = body_radius + 4.0
-		var bounced = false
+	_enforce_arena_bounds()
 
-		if global_position.x < bounds.position.x + margin:
-			global_position.x = bounds.position.x + margin
-			wander_direction.x = absf(wander_direction.x)
-			bounced = true
-		elif global_position.x > bounds.position.x + bounds.size.x - margin:
-			global_position.x = bounds.position.x + bounds.size.x - margin
-			wander_direction.x = -absf(wander_direction.x)
-			bounced = true
+func _enforce_arena_bounds() -> void:
+	if not bounce_screen_bounds:
+		return
+	var bounds = arena_bounds if arena_bounds.size != Vector2.ZERO else get_viewport_rect()
+	var margin = body_radius + 4.0
+	var bounced = false
 
-		if global_position.y < bounds.position.y + margin:
-			global_position.y = bounds.position.y + margin
-			wander_direction.y = absf(wander_direction.y)
-			bounced = true
-		elif global_position.y > bounds.position.y + bounds.size.y - margin:
-			global_position.y = bounds.position.y + bounds.size.y - margin
-			wander_direction.y = -absf(wander_direction.y)
-			bounced = true
+	if global_position.x < bounds.position.x + margin:
+		global_position.x = bounds.position.x + margin
+		wander_direction.x = absf(wander_direction.x)
+		bounced = true
+	elif global_position.x > bounds.position.x + bounds.size.x - margin:
+		global_position.x = bounds.position.x + bounds.size.x - margin
+		wander_direction.x = -absf(wander_direction.x)
+		bounced = true
 
-		if bounced:
-			wander_direction = wander_direction.normalized()
+	if global_position.y < bounds.position.y + margin:
+		global_position.y = bounds.position.y + margin
+		wander_direction.y = absf(wander_direction.y)
+		bounced = true
+	elif global_position.y > bounds.position.y + bounds.size.y - margin:
+		global_position.y = bounds.position.y + bounds.size.y - margin
+		wander_direction.y = -absf(wander_direction.y)
+		bounced = true
+
+	if bounced:
+		wander_direction = wander_direction.normalized()
 
 func _pick_new_wander() -> void:
 	wander_timer = randf_range(wander_interval_min, wander_interval_max)
-	# 80% chance wander, 20% brief idle
 	if randf() < 0.8:
 		wander_direction = Vector2.from_angle(randf() * TAU)
 	else:
 		wander_direction = Vector2.ZERO
 
-## Handles death when health reaches 0: stops NPC, fades out, and disappears
 func die() -> void:
 	if is_dead:
 		return
+	_release_sleep_spot()
+	_release_recreation_spot()
+	attack_target = null
 	is_dead = true
+	remove_from_group("npcs")
 	died.emit(self)
 
-	# Disable physics, movement, and interaction immediately
 	can_move = false
 	velocity = Vector2.ZERO
 	input_pickable = false
 	is_mouse_hovered = false
+	is_selected = false
 	collision_layer = 0
 	collision_mask = 0
 	queue_redraw()
 
-	# Smooth death animation: fade opacity out and shrink slightly before disappearing
 	var tween = create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(self, "modulate:a", 0.0, 0.75).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tween.tween_property(self, "scale", scale * 0.7, 0.75).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tween.tween_property(self, "modulate:r", 1.5, 0.25)
-	# Disappear completely when fade finishes
 	tween.chain().tween_callback(queue_free)
 
-## Helper function to assign random needs for stress testing
 func randomize_needs() -> void:
-<<<<<<< Updated upstream
-	health = 100.0
-	# Hunger starts between 15 and 65
-=======
 	_release_sleep_spot()
 	_release_recreation_spot()
 	attack_target = null
 	knockback_velocity = Vector2.ZERO
 	current_state = NPCState.WANDER
 	health = max_health
->>>>>>> Stashed changes
 	hunger = randf_range(15.0, 65.0)
-	sleep_need = randf_range(0.0, 100.0)
-	talk_need = randf_range(0.0, 100.0)
-	tired = randf_range(0.0, 100.0)
-	boredom = randf_range(0.0, 100.0)
-	lust = randf_range(0.0, 100.0)
-	purpose = randf_range(0.0, 100.0)
-	fight = randf_range(0.0, 100.0)
+	sleep_need = randf_range(10.0, 75.0)
+	talk_need = randf_range(20.0, 85.0)
+	tired = randf_range(10.0, 70.0)
+	boredom = randf_range(20.0, 85.0)
+	lust = randf_range(15.0, 80.0)
+	purpose = randf_range(25.0, 85.0)
+	anger = randf_range(10.0, 75.0)
+	assign_random_personality()
+	_evaluate_utility_brain()
 
-## Helper to set a specific need's passive growth rate
 func set_need_rate(prop_name: String, rate: float) -> void:
 	for need in NEED_DEFINITIONS:
 		if need["prop"] == prop_name or need["rate_prop"] == prop_name:
 			set(need["rate_prop"], rate)
 			return
 
-## Helper to set all need growth rates simultaneously
 func set_all_rates(rate: float) -> void:
 	for need in NEED_DEFINITIONS:
 		set(need["rate_prop"], rate)
 
+func set_sleeping_need_rate(prop_name: String, rate: float) -> void:
+	for need in NEED_DEFINITIONS:
+		if need["prop"] == prop_name or need["rate_prop"] == prop_name:
+			sleeping_growth_rates[need["prop"]] = rate
+			return
+
+func set_all_sleeping_rates(rate: float) -> void:
+	for need in NEED_DEFINITIONS:
+		sleeping_growth_rates[need["prop"]] = rate
+
+func reset_sleeping_rates_to_default(scale_mult: float = 1.0) -> void:
+	for need in NEED_DEFINITIONS:
+		var prop: String = need["prop"]
+		sleeping_growth_rates[prop] = DEFAULT_SLEEPING_RATES.get(prop, 0.0) * scale_mult
+
+func set_recreation_need_rate(prop_name: String, rate: float) -> void:
+	for need in NEED_DEFINITIONS:
+		if need["prop"] == prop_name or need["rate_prop"] == prop_name:
+			recreation_growth_rates[need["prop"]] = rate
+			return
+
+func set_all_recreation_rates(rate: float) -> void:
+	for need in NEED_DEFINITIONS:
+		recreation_growth_rates[need["prop"]] = rate
+
+func reset_recreation_rates_to_default(scale_mult: float = 1.0) -> void:
+	for need in NEED_DEFINITIONS:
+		var prop: String = need["prop"]
+		recreation_growth_rates[prop] = DEFAULT_RECREATION_RATES.get(prop, 0.0) * scale_mult
+
 # ==============================================================================
-# DRAWING
+# DRAWING (RADIAL BARS + SOCIAL CONNECTION LINE + STATE/PERSONALITY PILL)
 # ==============================================================================
 func _draw() -> void:
-	# 1. Circle body (button-like appearance)
+	# 0. Draw live social connection beam if conversing with a partner
+	if current_state == NPCState.IN_CONVERSATION and is_instance_valid(social_partner) and not social_partner.is_dead:
+		var rel_partner: Vector2 = social_partner.global_position - global_position
+		draw_line(Vector2.ZERO, rel_partner * 0.5, conversation_color, 3.0, true)
+		draw_circle(rel_partner * 0.5, 4.0, conversation_color.lightened(0.3))
+
+	# 0b. Draw aggressive headbutt telegraph / charge indicator when ATTACKING
+	if current_state == NPCState.ATTACKING and is_instance_valid(attack_target) and not attack_target.is_dead:
+		var aim_dir: Vector2 = (attack_target.global_position - global_position).normalized()
+		if aim_dir != Vector2.ZERO:
+			var tip_dist: float = body_radius + (13.0 if attack_phase == AttackPhase.LUNGE else 9.0)
+			var base_dist: float = body_radius + 2.0
+			var perp: Vector2 = aim_dir.orthogonal() * 6.0
+			var tri := PackedVector2Array([
+				aim_dir * tip_dist,
+				aim_dir * base_dist + perp,
+				aim_dir * base_dist - perp
+			])
+			var charge_col: Color = Color(1.0, 0.22, 0.18, 0.95) if attack_phase == AttackPhase.LUNGE else Color(0.95, 0.35, 0.2, 0.85)
+			draw_colored_polygon(tri, charge_col)
+			if attack_phase == AttackPhase.LUNGE:
+				draw_line(-aim_dir * (body_radius + 14.0), -aim_dir * body_radius, Color(1.0, 0.35, 0.2, 0.65), 4.0, true)
+
+	# 1. Circle body
 	var active_outline: Color = Color.WHITE if is_mouse_hovered else body_outline_color
 	var active_width: float = body_outline_width + (1.0 if is_mouse_hovered else 0.0)
 
-	# Hover glow aura
 	if is_mouse_hovered and not is_dead:
 		draw_circle(Vector2.ZERO, body_radius + 4.0, Color(1, 1, 1, 0.18))
 
-	# Disc body
+	# Selected camera-focus reticle ring
+	if is_selected and not is_dead:
+		var pulse: float = sin(Time.get_ticks_msec() * 0.008) * 1.5
+		var sel_r: float = body_radius + 7.0 + pulse
+		var sel_col: Color = Color(0.45, 0.92, 1.0, 0.92)
+		draw_arc(Vector2.ZERO, sel_r, 0.0, TAU, 40, sel_col, 2.0, true)
+		for dir in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
+			draw_line(dir * (sel_r - 2.0), dir * (sel_r + 5.0), sel_col, 2.0, true)
+
 	draw_circle(Vector2.ZERO, body_radius, body_color)
+	var inner_col: Color = MALE_INNER_COLOR if gender == Gender.MALE else FEMALE_INNER_COLOR
+	draw_circle(Vector2.ZERO, body_radius * 0.68, inner_col)
 
-	# Inner button ridge / tactile bevel
-	draw_circle(Vector2.ZERO, body_radius * 0.65, body_color.lightened(0.12))
-
-	# Circle border (glows amber if hungry and unhovered)
-	if is_hungry() and not is_mouse_hovered:
+	if hit_flash_timer > 0.0:
+		var flash_a: float = clampf(hit_flash_timer / 0.24, 0.0, 1.0)
+		draw_circle(Vector2.ZERO, body_radius, Color(1.0, 0.3, 0.25, 0.65 * flash_a))
+		draw_arc(Vector2.ZERO, body_radius + 2.0, 0.0, TAU, 36, Color(1.0, 0.9, 0.85, flash_a), 3.0, true)
+	elif current_state == NPCState.ATTACKING and not is_mouse_hovered:
+		var attack_glow = Color(0.98, 0.18, 0.18, 0.95)
+		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, attack_glow, active_width + 1.0, true)
+	elif is_hungry() and not is_mouse_hovered:
 		var hungry_glow = Color(0.98, 0.52, 0.12, 0.85)
 		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, hungry_glow, active_width + 0.5, true)
+	elif current_state == NPCState.SLEEPING and not is_mouse_hovered:
+		var sleep_glow = Color(0.25, 0.48, 0.98, 0.9)
+		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, sleep_glow, active_width + 0.5, true)
+	elif current_state == NPCState.IN_RECREATION and not is_mouse_hovered:
+		var rec_glow = Color(0.95, 0.76, 0.16, 0.9)
+		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, rec_glow, active_width + 0.5, true)
 	else:
 		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, active_outline, active_width, true)
 
-	# Center button pip (orange when hungry)
-	var pip_color = Color(0.98, 0.52, 0.12) if is_hungry() else active_outline
-	draw_circle(Vector2.ZERO, 3.0, pip_color)
+	# Numeric name centered inside the gender-colored inner circle
+	var id_font = ThemeDB.fallback_font
+	if id_font != null and npc_number > 0:
+		var id_text: String = str(npc_number)
+		var id_font_size: int = 11 if id_text.length() <= 2 else (9 if id_text.length() == 3 else 8)
+		var id_sz: Vector2 = id_font.get_string_size(id_text, HORIZONTAL_ALIGNMENT_CENTER, -1, id_font_size)
+		var ascent: float = id_font.get_ascent(id_font_size)
+		var descent: float = id_font.get_descent(id_font_size)
+		var id_pos: Vector2 = Vector2(-id_sz.x * 0.5, (ascent - descent) * 0.5)
+		draw_string(id_font, id_pos + Vector2(1.0, 1.0), id_text, HORIZONTAL_ALIGNMENT_LEFT, -1, id_font_size, Color(0.04, 0.05, 0.08, 0.85))
+		draw_string(id_font, id_pos, id_text, HORIZONTAL_ALIGNMENT_LEFT, -1, id_font_size, Color.WHITE)
 
-	# 2. Draw the 8 radial bars ONLY if mouse is over the NPC and NPC is not dead
+	# 1b. Draw headbutt impact shockwave & starburst rays at collision point
+	if impact_fx_timer > 0.0:
+		var t: float = 1.0 - clampf(impact_fx_timer / 0.24, 0.0, 1.0)
+		var alpha: float = 1.0 - t
+		var local_hit: Vector2 = to_local(impact_fx_world_pos)
+		var ring_r: float = lerpf(4.0, 22.0, t)
+		draw_arc(local_hit, ring_r, 0.0, TAU, 20, Color(1.0, 0.85, 0.35, alpha), 2.2, true)
+		for k in range(6):
+			var ang: float = (TAU * float(k) / 6.0) + 0.35
+			var ray_dir: Vector2 = Vector2.from_angle(ang)
+			draw_line(local_hit + ray_dir * (ring_r * 0.45), local_hit + ray_dir * (ring_r + 6.0), Color(1.0, 0.35, 0.2, alpha), 2.0, true)
+
+	# 1c. Draw floating chunk-damage popups (e.g. "-16")
+	if id_font != null and not floating_popups.is_empty():
+		for p in floating_popups:
+			var life_ratio: float = clampf(float(p["life"]) / float(p["max_life"]), 0.0, 1.0)
+			var txt: String = String(p["text"])
+			var col: Color = p["color"]
+			col.a = life_ratio
+			var pop_sz: Vector2 = id_font.get_string_size(txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+			var pop_pos: Vector2 = (p["pos"] as Vector2) - Vector2(pop_sz.x * 0.5, 0.0)
+			draw_string(id_font, pop_pos + Vector2(1.0, 1.0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.0, 0.0, 0.0, 0.85 * life_ratio))
+			draw_string(id_font, pop_pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col)
+
+	# 2. Draw the 8 radial bars ONLY if mouse is over the NPC
 	if is_mouse_hovered and not is_dead:
 		_draw_bars()
 
@@ -1618,30 +2006,42 @@ func _draw() -> void:
 	if not is_dead and (show_health_always or health < max_health or is_mouse_hovered or is_selected):
 		_draw_health_bar()
 
+	# 4. Draw Personality & Active Branch / Conversation Topic Pill below NPC
+	if not is_dead and (show_labels or is_mouse_hovered or current_state == NPCState.IN_CONVERSATION):
+		_draw_state_pill()
+
+func _draw_state_pill() -> void:
+	var font = ThemeDB.fallback_font
+	if font == null:
+		return
+
+	var y_offset: float = (body_radius + bar_length + 26.0) if is_mouse_hovered else (body_radius + 15.0)
+	var text: String = "#%d [%s] %s" % [npc_number, personality_name, state_label_text]
+	var font_size: int = 9
+	var sz: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
+	var pill_rect: Rect2 = Rect2(Vector2(-sz.x * 0.5 - 5.0, y_offset - 10.0), Vector2(sz.x + 10.0, 14.0))
+
+	var border_col: Color = Color(0.95, 0.22, 0.2) if current_state == NPCState.ATTACKING else (conversation_color if current_state == NPCState.IN_CONVERSATION else personality_tint)
+	draw_rect(pill_rect, Color(0.06, 0.08, 0.11, 0.88), true)
+	draw_rect(pill_rect, border_col * 0.85, false, 1.0)
+	draw_string(font, Vector2(pill_rect.position.x + 5.0, pill_rect.position.y + 10.5), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.WHITE)
+
 func _draw_health_bar() -> void:
 	var font = ThemeDB.fallback_font
-	# Position above hunger radial bar if hovered, or directly above circle if unhovered
 	var bar_y: float = -(body_radius + bar_length + 28.0) if is_mouse_hovered else -(body_radius + 9.0)
 	var bar_w: float = 32.0
 	var bar_h: float = 5.0
 	var bar_rect: Rect2 = Rect2(-bar_w * 0.5, bar_y - bar_h * 0.5, bar_w, bar_h)
 
-	# Background track
 	draw_rect(bar_rect, Color(0.06, 0.08, 0.1, 0.9), true)
 
-	# Border outline (pulses red when taking starvation damage from hunger == 100)
 	var border_col: Color = Color(0.3, 0.36, 0.45, 0.9)
-	if hunger >= 100.0:
+	if hunger >= 100.0 or current_state == NPCState.ATTACKING or hit_flash_timer > 0.0:
 		var pulse: float = sin(Time.get_ticks_msec() * 0.012) * 0.5 + 0.5
 		border_col = Color(1.0, 0.25, 0.25, 1.0).lerp(Color(0.5, 0.1, 0.1, 0.9), pulse)
 	draw_rect(bar_rect, border_col, false, 1.0)
 
-<<<<<<< Updated upstream
-	# Health Fill
-	var hp_ratio: float = clampf(health / 100.0, 0.0, 1.0)
-=======
 	var hp_ratio: float = clampf(health / max_health, 0.0, 1.0) if max_health > 0.0 else 0.0
->>>>>>> Stashed changes
 	if hp_ratio > 0.005:
 		var hp_col: Color
 		if hp_ratio > 0.5:
@@ -1653,14 +2053,8 @@ func _draw_health_bar() -> void:
 		var fill_rect: Rect2 = Rect2(-bar_w * 0.5 + 1.0, bar_y - bar_h * 0.5 + 1.0, fill_w, bar_h - 2.0)
 		draw_rect(fill_rect, hp_col, true)
 
-<<<<<<< Updated upstream
-	# Text readout when hovered or actively taking starvation damage
-	if font != null and (is_mouse_hovered or hunger >= 100.0 or health < 100.0):
-		var hp_text: String = "HP: %d" % int(round(health))
-=======
 	if font != null and (is_mouse_hovered or is_selected or hunger >= 100.0 or health < max_health):
 		var hp_text: String = ("HP: %d/%d" % [int(round(health)), int(round(max_health))]) if not is_equal_approx(max_health, 100.0) else ("HP: %d" % int(round(health)))
->>>>>>> Stashed changes
 		if hunger >= 100.0:
 			hp_text += " (STARVING)"
 		var font_size: int = 9
@@ -1683,37 +2077,31 @@ func _draw_bars() -> void:
 		var max_pt: Vector2 = dir * end_dist
 		var fill_pt: Vector2 = dir * (start_dist + (bar_length * ratio))
 
-		# Background slot track (dark track showing the 0-100 full capacity)
 		draw_line(start_pt, max_pt, Color(0.08, 0.1, 0.12, 0.8), bar_thickness + 2.0, true)
 		draw_line(start_pt, max_pt, Color(0.24, 0.28, 0.34, 0.9), bar_thickness, true)
 
-		# Filled bar (emanating from circle outward)
 		if ratio > 0.01:
 			draw_line(start_pt, fill_pt, color, bar_thickness, true)
-			# Small rounded pip at end of fill
 			draw_circle(fill_pt, bar_thickness * 0.5, color.lightened(0.25))
 
-		# End cap tick mark (100% boundary marker)
 		var perp = dir.orthogonal() * (bar_thickness * 0.8)
 		draw_line(max_pt - perp, max_pt + perp, Color(0.75, 0.8, 0.88, 0.85), 1.5, true)
 
-		# Optional text label & value pill at outer tip
 		if show_labels and font != null:
 			var label_dist: float = end_dist + 14.0
 			var center_pos: Vector2 = dir * label_dist
-			var text: String = "%s: %d" % [need["name"], int(round(val))]
+			var w_mult: float = personality_weights.get(need["prop"], 1.0)
+			var text: String = "%s: %d (x%.1f)" % [need["name"], int(round(val)), w_mult]
 			if need["prop"] == "hunger" and val >= HUNGRY_THRESHOLD:
 				text = "%s: %d (HUNGRY)" % [need["name"], int(round(val))]
 
 			var font_size: int = 10
 			var str_size: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
 
-			# Position pill box
 			var pill_rect: Rect2 = Rect2(center_pos - (str_size * 0.5) - Vector2(4, 2), str_size + Vector2(8, 4))
 			draw_rect(pill_rect, Color(0.08, 0.1, 0.12, 0.92), true)
 			draw_rect(pill_rect, color * 0.7, false, 1.0)
 
-			# Center text baseline inside the pill
 			var text_pos: Vector2 = Vector2(
 				pill_rect.position.x + 4.0,
 				pill_rect.position.y + pill_rect.size.y - 4.0

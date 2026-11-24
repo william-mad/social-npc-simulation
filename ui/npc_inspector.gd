@@ -64,6 +64,7 @@ func _process(_delta: float) -> void:
 	_refresh_live_values()
 
 func set_target_npc(npc: NPC) -> void:
+	_is_dragging_hp = false
 	if is_instance_valid(npc) and not npc.is_dead:
 		target_npc = npc
 		visible = true
@@ -150,8 +151,10 @@ func _build_stats_tab() -> void:
 	hp_slider.drag_ended.connect(func(_changed: bool): _is_dragging_hp = false)
 	hp_slider.value_changed.connect(func(v: float):
 		if is_instance_valid(target_npc) and not target_npc.is_dead:
-			target_npc.health = v
-			hp_val_label.text = "%d" % int(round(target_npc.health))
+			var npc_ref: NPC = target_npc
+			npc_ref.health = v
+			if is_instance_valid(target_npc) and target_npc == npc_ref:
+				hp_val_label.text = "%d" % int(round(npc_ref.health))
 	)
 
 	# 2. Max Hit Points
@@ -160,14 +163,16 @@ func _build_stats_tab() -> void:
 	max_hp_val_label = max_hp_row["label"]
 	max_hp_slider.value_changed.connect(func(v: float):
 		if is_instance_valid(target_npc) and not target_npc.is_dead:
-			var prev_max: float = target_npc.max_health
-			target_npc.max_health = v
-			if v > prev_max and target_npc.health >= prev_max - 0.5:
-				target_npc.health = v
-			hp_slider.max_value = v
-			hp_slider.set_value_no_signal(target_npc.health)
-			max_hp_val_label.text = "%d" % int(round(v))
-			hp_val_label.text = "%d" % int(round(target_npc.health))
+			var npc_ref: NPC = target_npc
+			var prev_max: float = npc_ref.max_health
+			npc_ref.max_health = v
+			if is_instance_valid(target_npc) and target_npc == npc_ref and not npc_ref.is_dead:
+				if v > prev_max and npc_ref.health >= prev_max - 0.5:
+					npc_ref.health = v
+				hp_slider.max_value = v
+				hp_slider.set_value_no_signal(npc_ref.health)
+				max_hp_val_label.text = "%d" % int(round(v))
+				hp_val_label.text = "%d" % int(round(npc_ref.health))
 	)
 
 	# 3. Hit Damage

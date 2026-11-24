@@ -3,8 +3,6 @@ extends Node2D
 
 const NPC_SCENE = preload("res://npc/npc.tscn")
 const FOOD_SCENE = preload("res://food/food.tscn")
-<<<<<<< Updated upstream
-=======
 const SLEEP_SPOT_SCENE = preload("res://sleep_spot/sleep_spot.tscn")
 const RECREATION_SPOT_SCENE = preload("res://recreation_spot/recreation_spot.tscn")
 const NPC_INSPECTOR_SCRIPT = preload("res://ui/npc_inspector.gd")
@@ -19,7 +17,6 @@ enum TimeOfDay {
 	DAY,
 	NIGHT
 }
->>>>>>> Stashed changes
 
 enum LeftTab {
 	SIM,
@@ -35,8 +32,13 @@ enum RightTab {
 
 @export var arena_size: Vector2 = Vector2(1600, 1000)
 @export var initial_npc_count: int = 15
+@export var death_food_drop_amount: float = 50.0
+@export var day_duration: float = 20.0
+@export var night_duration: float = 20.0
 
 # Nodes
+@onready var sleep_spot_container: Node2D = $SleepSpotContainer
+@onready var recreation_spot_container: Node2D = $RecreationSpotContainer
 @onready var food_container: Node2D = $FoodContainer
 @onready var npc_container: Node2D = $NPCContainer
 @onready var camera: Camera2D = $Camera2D
@@ -63,15 +65,21 @@ enum RightTab {
 @onready var labels_toggle_btn: Button = %LabelsToggleBtn
 @onready var npcs_collide_btn: Button = %NPCsCollideBtn
 
-# Food UI Controls
+# Placement Tool, Food, Sleep Spot & Recreation Spot UI Controls
+@onready var tool_food_btn: Button = %ToolFoodBtn
+@onready var tool_sleep_spot_btn: Button = %ToolSleepSpotBtn
+@onready var tool_rec_spot_btn: Button = %ToolRecSpotBtn
 @onready var food_amount_slider: HSlider = %FoodAmountSlider
 @onready var food_amount_val_label: Label = %FoodAmountValLabel
 @onready var drop_center_food_btn: Button = %DropCenterFoodBtn
 @onready var clear_food_btn: Button = %ClearFoodBtn
+@onready var sleep_spot_count_label: Label = %SleepSpotCountLabel
+@onready var place_center_sleep_btn: Button = %PlaceCenterSleepBtn
+@onready var clear_sleep_spots_btn: Button = %ClearSleepSpotsBtn
+@onready var rec_spot_count_label: Label = %RecSpotCountLabel
+@onready var place_center_rec_btn: Button = %PlaceCenterRecBtn
+@onready var clear_rec_spots_btn: Button = %ClearRecSpotsBtn
 
-<<<<<<< Updated upstream
-# Right Growth Panel UI Nodes
-=======
 # Unified Right Sliders Panel UI Nodes (4 Symbol Tabs: Growth / Sleep / Rec / Gender)
 @onready var retract_right_panel_btn: Button = %RetractRightPanelBtn
 @onready var right_panel_content: VBoxContainer = %RightPanelContent
@@ -86,17 +94,14 @@ enum RightTab {
 @onready var pause_cycle_btn: Button = %PauseCycleBtn
 @onready var edit_day_sliders_btn: Button = %EditDaySlidersBtn
 @onready var edit_night_sliders_btn: Button = %EditNightSlidersBtn
->>>>>>> Stashed changes
 @onready var master_scale_slider: HSlider = %MasterScaleSlider
 @onready var master_scale_label: Label = %MasterScaleLabel
 @onready var need_sliders_vbox: VBoxContainer = %NeedSlidersVBox
+@onready var max_effects_sliders_vbox: VBoxContainer = %MaxEffectsSlidersVBox
 @onready var freeze_growth_btn: Button = %FreezeGrowthBtn
 @onready var default_growth_btn: Button = %DefaultGrowthBtn
 @onready var fast_growth_btn: Button = %FastGrowthBtn
 
-<<<<<<< Updated upstream
-# Camera dragging state
-=======
 # Sleep Tab UI Nodes
 @onready var sleep_sliders_content: VBoxContainer = %SleepSlidersContent
 @onready var sleep_need_sliders_vbox: VBoxContainer = %SleepNeedSlidersVBox
@@ -139,10 +144,10 @@ var active_left_tab: LeftTab = LeftTab.SIM
 var active_right_tab: RightTab = RightTab.GROWTH
 
 # Camera dragging & NPC follow state
->>>>>>> Stashed changes
 var is_panning: bool = false
 var pan_drag_start: Vector2 = Vector2.ZERO
 var camera_pan_start: Vector2 = Vector2.ZERO
+var selected_npc: NPC = null
 
 # Simulation state
 var movement_enabled: bool = true
@@ -150,29 +155,80 @@ var current_speed: float = 75.0
 var show_labels: bool = true
 var collide_between_npcs: bool = false
 var food_drop_amount: float = 50.0
+var active_click_tool: ClickTool = ClickTool.FOOD
 
-# Passive growth settings
-var growth_rates: Dictionary = {
+# Day / Night cycle state & dual passive growth tables (awake)
+var current_time_of_day: TimeOfDay = TimeOfDay.DAY
+var editing_time_of_day: TimeOfDay = TimeOfDay.DAY
+var time_of_day_elapsed: float = 0.0
+var day_night_cycle_paused: bool = false
+
+var day_growth_rates: Dictionary = {
 	"hunger": 1.0,
-	"sleep_need": 1.0,
-	"talk_need": 1.0,
+	"sleep_need": 0.7,
+	"talk_need": 1.2,
 	"tired": 1.0,
-	"boredom": 1.0,
-	"lust": 1.0,
-	"purpose": 1.0,
-	"fight": 1.0
+	"boredom": 1.2,
+	"lust": 0.9,
+	"purpose": 1.2,
+	"anger": 1.0
 }
+var night_growth_rates: Dictionary = {
+	"hunger": 0.6,
+	"sleep_need": 2.4,
+	"talk_need": 0.6,
+	"tired": 1.5,
+	"boredom": 0.5,
+	"lust": 1.5,
+	"purpose": 0.4,
+	"anger": 0.8
+}
+# Alias pointing to whichever phase is active right now
+var growth_rates: Dictionary:
+	get:
+		return day_growth_rates if current_time_of_day == TimeOfDay.DAY else night_growth_rates
+
+# Max-need (100) penalty rates (pts/sec)
+var max_hunger_health_drain_rate: float = 1.0
+var max_boredom_anger_rate: float = 2.0
+var max_purpose_anger_rate: float = 2.0
+var max_tired_anger_rate: float = 2.0
+
+# Romance initiation rule & separate Male/Female growth multipliers
+var romance_initiator_mode: NPC.RomanceInitiator = NPC.RomanceInitiator.BOTH
+var editing_gender: NPC.Gender = NPC.Gender.MALE
+var male_scale_multiplier: float = 1.0
+var female_scale_multiplier: float = 1.0
+var male_need_multipliers: Dictionary = {
+	"hunger": 1.0, "sleep_need": 1.0, "talk_need": 1.0, "tired": 1.0,
+	"boredom": 1.0, "lust": 1.0, "purpose": 1.0, "anger": 1.0
+}
+var female_need_multipliers: Dictionary = {
+	"hunger": 1.0, "sleep_need": 1.0, "talk_need": 1.0, "tired": 1.0,
+	"boredom": 1.0, "lust": 1.0, "purpose": 1.0, "anger": 1.0
+}
+
+# Passive growth settings (when sleeping / recreating)
+var sleeping_growth_rates: Dictionary = NPC.DEFAULT_SLEEPING_RATES.duplicate()
+var recreation_growth_rates: Dictionary = NPC.DEFAULT_RECREATION_RATES.duplicate()
 var master_growth_multiplier: float = 1.0
 var slider_controls: Dictionary = {}
+var max_effect_slider_controls: Dictionary = {}
+var sleep_slider_controls: Dictionary = {}
+var rec_slider_controls: Dictionary = {}
+var gender_slider_controls: Dictionary = {}
 var total_deaths: int = 0
+var next_npc_number: int = 1
 
 func _ready() -> void:
 	_setup_arena_walls()
 	_setup_camera()
 	_setup_growth_sliders_ui()
+	_setup_max_effect_sliders_ui()
+	_setup_sleeping_growth_sliders_ui()
+	_setup_recreation_growth_sliders_ui()
+	_setup_gender_multipliers_ui()
 	_connect_ui_signals()
-<<<<<<< Updated upstream
-=======
 	set_active_click_tool(ClickTool.FOOD)
 	set_romance_initiator_mode(NPC.RomanceInitiator.BOTH)
 	set_editing_time_of_day(TimeOfDay.DAY)
@@ -183,16 +239,14 @@ func _ready() -> void:
 	set_right_panel_expanded(true)
 	_update_day_night_ui()
 	_update_inspector_top_button()
->>>>>>> Stashed changes
 
 	# Spawn initial batch of NPCs
 	spawn_npcs(initial_npc_count)
 
 func _process(delta: float) -> void:
+	_process_day_night_cycle(delta)
 	_update_fps_metrics(delta)
 	_handle_camera_keyboard(delta)
-<<<<<<< Updated upstream
-=======
 	_process_camera_follow(delta)
 
 func _process_day_night_cycle(delta: float) -> void:
@@ -249,7 +303,6 @@ func _update_day_night_ui() -> void:
 		edit_night_sliders_btn.modulate = Color(0.68, 0.8, 1.0) if night_sel else Color(0.75, 0.78, 0.85)
 
 	_update_right_top_button_text()
->>>>>>> Stashed changes
 
 func _update_fps_metrics(delta: float) -> void:
 	var fps = Engine.get_frames_per_second()
@@ -273,19 +326,15 @@ func _update_fps_metrics(delta: float) -> void:
 		npc_count_label.text = "NPCs: %d" % living
 
 	if deaths_label:
-		deaths_label.text = "Starved: %d" % total_deaths
+		deaths_label.text = "Deaths: %d" % total_deaths
 
 	if food_count_label and food_container:
-		var total_food: float = 0.0
 		var active_items: int = 0
 		for child in food_container.get_children():
 			if child is Food and not child.is_depleted:
-				total_food += child.amount
 				active_items += 1
 		food_count_label.text = "Food: %d" % active_items
 
-<<<<<<< Updated upstream
-=======
 	if sleep_spot_count_label and sleep_spot_container:
 		var spot_count: int = 0
 		var occupied: int = 0
@@ -310,7 +359,6 @@ func _update_fps_metrics(delta: float) -> void:
 				capacity += spot.max_capacity
 		rec_spot_count_label.text = "%d (%d/%d)" % [spot_count, occupied, capacity]
 
->>>>>>> Stashed changes
 # ==============================================================================
 # PASSIVE GROWTH SLIDERS & CONTROLS
 # ==============================================================================
@@ -386,15 +434,42 @@ func _format_rate_text(rate: float) -> String:
 	else:
 		return "0.0/s"
 
+func _get_editing_growth_table() -> Dictionary:
+	return day_growth_rates if editing_time_of_day == TimeOfDay.DAY else night_growth_rates
+
+func set_editing_time_of_day(phase: TimeOfDay) -> void:
+	editing_time_of_day = phase
+	var table: Dictionary = _get_editing_growth_table()
+	for prop in slider_controls:
+		var ctrl = slider_controls[prop]
+		var val: float = float(table.get(prop, 1.0))
+		if ctrl.has("slider"):
+			(ctrl["slider"] as HSlider).set_value_no_signal(val)
+		if ctrl.has("label"):
+			(ctrl["label"] as Label).text = _format_rate_text(val)
+	_update_day_night_ui()
+
 func _on_need_slider_changed(prop: String, new_rate: float, val_lbl: Label) -> void:
-	growth_rates[prop] = new_rate
+	var table: Dictionary = _get_editing_growth_table()
+	table[prop] = new_rate
 	if val_lbl:
 		val_lbl.text = _format_rate_text(new_rate)
 
-	var effective_rate = new_rate * master_growth_multiplier
-	for child in npc_container.get_children():
-		if child is NPC:
-			child.set_need_rate(prop, effective_rate)
+	if editing_time_of_day == current_time_of_day:
+		var effective_rate = new_rate * master_growth_multiplier
+		for child in npc_container.get_children():
+			if child is NPC:
+				child.set_need_rate(prop, effective_rate)
+
+func _apply_active_growth_rates_to_all() -> void:
+	if not npc_container:
+		return
+	var active_table: Dictionary = growth_rates
+	for prop in active_table:
+		var effective_rate: float = float(active_table[prop]) * master_growth_multiplier
+		for child in npc_container.get_children():
+			if child is NPC:
+				child.set_need_rate(prop, effective_rate)
 
 func set_all_growth_rates(rate: float) -> void:
 	for prop in slider_controls:
@@ -407,17 +482,22 @@ func _on_master_scale_changed(val: float) -> void:
 	if master_scale_label:
 		master_scale_label.text = "%.1fx" % val
 
-	for prop in growth_rates:
-		var effective_rate = growth_rates[prop] * master_growth_multiplier
+	var active_table: Dictionary = growth_rates
+	for prop in active_table:
+		var effective_rate = float(active_table[prop]) * master_growth_multiplier
+		var effective_sleep_rate = sleeping_growth_rates.get(prop, 0.0) * master_growth_multiplier
+		var effective_rec_rate = recreation_growth_rates.get(prop, 0.0) * master_growth_multiplier
 		for child in npc_container.get_children():
 			if child is NPC:
 				child.set_need_rate(prop, effective_rate)
+				child.set_sleeping_need_rate(prop, effective_sleep_rate)
+				child.set_recreation_need_rate(prop, effective_rec_rate)
+
+	_apply_max_effect_rates_to_all()
 
 # ==============================================================================
-# FOOD MANAGEMENT
+# MAX-NEED (100) PENALTY SLIDERS (HEALTH DRAIN & ANGER SPIKE)
 # ==============================================================================
-<<<<<<< Updated upstream
-=======
 func _setup_max_effect_sliders_ui() -> void:
 	if not max_effects_sliders_vbox:
 		return
@@ -880,7 +960,6 @@ func clear_all_recreation_spots() -> void:
 		return
 	for child in recreation_spot_container.get_children():
 		child.queue_free()
->>>>>>> Stashed changes
 func spawn_food(pos: Vector2, amount: float) -> Food:
 	var food: Food = FOOD_SCENE.instantiate()
 	food.global_position = pos
@@ -913,6 +992,10 @@ func spawn_single_npc(pos: Vector2 = Vector2.ZERO, randomize_values: bool = true
 			randf_range(margin, arena_size.y - margin)
 		)
 
+	npc.npc_number = next_npc_number
+	next_npc_number += 1
+	npc.name = "NPC_%d" % npc.npc_number
+	npc.assign_random_gender()
 	npc.global_position = pos
 	npc.arena_bounds = Rect2(Vector2.ZERO, arena_size)
 	npc.can_move = movement_enabled
@@ -920,34 +1003,50 @@ func spawn_single_npc(pos: Vector2 = Vector2.ZERO, randomize_values: bool = true
 	npc.show_labels = show_labels
 	npc.collide_with_npcs = collide_between_npcs
 
-	# Apply current growth rates to new NPC
-	for prop in growth_rates:
-		npc.set_need_rate(prop, growth_rates[prop] * master_growth_multiplier)
+	# Apply current growth rates (awake, sleeping, recreating, max-need & gender settings) to new NPC
+	var active_table: Dictionary = growth_rates
+	for prop in active_table:
+		npc.set_need_rate(prop, float(active_table[prop]) * master_growth_multiplier)
+		npc.set_sleeping_need_rate(prop, sleeping_growth_rates.get(prop, 0.0) * master_growth_multiplier)
+		npc.set_recreation_need_rate(prop, recreation_growth_rates.get(prop, 0.0) * master_growth_multiplier)
+	_apply_max_effect_rates_to_npc(npc)
+	_apply_gender_settings_to_npc(npc)
 
-	# Connect death signal
+	# Connect death & Purpose foraging signals
 	npc.died.connect(_on_npc_died)
+	npc.foraging_completed.connect(func(forage_pos: Vector2, amt: float):
+		spawn_food(forage_pos.clamp(Vector2(40, 40), arena_size - Vector2(40, 40)), amt)
+	)
+
+	npc_container.add_child(npc)
 
 	if randomize_values:
 		npc.randomize_needs()
 
-	npc_container.add_child(npc)
 	return npc
 
-func _on_npc_died(_npc: NPC) -> void:
+func _on_npc_died(npc: NPC) -> void:
+	if selected_npc == npc:
+		select_npc(null)
 	total_deaths += 1
 	if deaths_label:
-		deaths_label.text = "Starved: %d" % total_deaths
+		deaths_label.text = "Deaths: %d" % total_deaths
+	if is_instance_valid(npc) and death_food_drop_amount > 0.0:
+		var drop_pos: Vector2 = npc.global_position.clamp(Vector2(40, 40), arena_size - Vector2(40, 40))
+		spawn_food(drop_pos, death_food_drop_amount)
 
 func spawn_npcs(count: int) -> void:
 	for i in range(count):
 		spawn_single_npc()
 
 func clear_all_npcs() -> void:
+	select_npc(null)
 	for child in npc_container.get_children():
 		child.queue_free()
 	total_deaths = 0
+	next_npc_number = 1
 	if deaths_label:
-		deaths_label.text = "Starved: 0"
+		deaths_label.text = "Deaths: 0"
 
 func set_movement_active(active: bool) -> void:
 	movement_enabled = active
@@ -1000,8 +1099,6 @@ func set_left_panel_expanded(expanded: bool) -> void:
 	if retract_left_panel_btn:
 		retract_left_panel_btn.text = "▾ ☰ World" if expanded else "▸ ☰ World"
 
-<<<<<<< Updated upstream
-=======
 func set_left_panel_visible(vis: bool) -> void:
 	if left_panel:
 		left_panel.visible = vis
@@ -1038,15 +1135,10 @@ func set_right_tab(tab: RightTab) -> void:
 		right_tab_gender_btn.text = "● ♂♀" if act else "♂♀"
 		right_tab_gender_btn.modulate = Color(0.9, 0.74, 1.0) if act else Color(0.75, 0.78, 0.84)
 
-	if right_panel:
-		right_panel.reset_size()
-
 func set_right_panel_expanded(expanded: bool) -> void:
 	if right_panel_content:
 		right_panel_content.visible = expanded
 	_update_day_night_ui()
-	if right_panel:
-		right_panel.reset_size()
 
 func set_right_panel_visible(vis: bool) -> void:
 	if right_panel:
@@ -1077,7 +1169,6 @@ func _toggle_inspector_from_top() -> void:
 			npc_inspector.visible = not npc_inspector.visible
 		_update_inspector_top_button()
 	elif npc_container:
-		# If nothing selected yet, select the first living NPC for convenience!
 		for child in npc_container.get_children():
 			if child is NPC and not (child as NPC).is_dead:
 				select_npc(child as NPC)
@@ -1105,7 +1196,6 @@ func _update_toggle_all_button_text() -> void:
 		)
 		toggle_all_ui_btn.text = "👁 (H)" if any_visible else "👁 +"
 
->>>>>>> Stashed changes
 # ==============================================================================
 # ARENA WALLS & SETUP
 # ==============================================================================
@@ -1151,23 +1241,34 @@ func _unhandled_input(event: InputEvent) -> void:
 		# Pan with Right or Middle Mouse Button
 		elif event.button_index == MOUSE_BUTTON_RIGHT or event.button_index == MOUSE_BUTTON_MIDDLE:
 			if event.pressed:
+				if selected_npc != null:
+					select_npc(null)
 				is_panning = true
 				pan_drag_start = event.position
 				camera_pan_start = camera.position
 			else:
 				is_panning = false
-		# Left-Click on open ground drops food with chosen amount!
+		# Left-Click on an NPC selects & centers camera on it; open ground places active tool!
 		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 			var mouse_world = get_global_mouse_position()
-			if Rect2(Vector2.ZERO, arena_size).has_point(mouse_world):
-				spawn_food(mouse_world, food_drop_amount)
+			var clicked_npc: NPC = _find_npc_at_position(mouse_world)
+			if clicked_npc != null:
+				if selected_npc == clicked_npc:
+					select_npc(null)
+				else:
+					select_npc(clicked_npc)
+			elif Rect2(Vector2.ZERO, arena_size).has_point(mouse_world):
+				if active_click_tool == ClickTool.SLEEP_SPOT:
+					spawn_sleep_spot(mouse_world)
+				elif active_click_tool == ClickTool.RECREATION_SPOT:
+					spawn_recreation_spot(mouse_world)
+				else:
+					spawn_food(mouse_world, food_drop_amount)
 
 	elif event is InputEventMouseMotion and is_panning:
 		var delta_pos = (event.position - pan_drag_start) / camera.zoom.x
 		camera.position = camera_pan_start - delta_pos
 
-<<<<<<< Updated upstream
-=======
 	elif event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_H or event.keycode == KEY_TAB:
 			toggle_all_ui()
@@ -1223,7 +1324,6 @@ func _process_camera_follow(delta: float) -> void:
 	if camera and not is_panning:
 		camera.position = camera.position.lerp(selected_npc.global_position, minf(1.0, 12.0 * delta))
 
->>>>>>> Stashed changes
 func _zoom_camera(factor: float) -> void:
 	var prev_zoom = camera.zoom
 	var new_zoom = (prev_zoom * factor).clamp(Vector2(0.25, 0.25), Vector2(3.0, 3.0))
@@ -1241,6 +1341,8 @@ func _handle_camera_keyboard(delta: float) -> void:
 		cam_dir.x += 1.0
 
 	if cam_dir != Vector2.ZERO:
+		if selected_npc != null:
+			select_npc(null)
 		var speed = 600.0 / camera.zoom.x
 		camera.position += cam_dir.normalized() * speed * delta
 
@@ -1285,6 +1387,28 @@ func _connect_ui_signals() -> void:
 	if reset_cam_btn:
 		reset_cam_btn.pressed.connect(_reset_camera)
 
+	# Click tool, Sleep Spot & Recreation Spot controls
+	if tool_food_btn:
+		tool_food_btn.pressed.connect(func(): set_active_click_tool(ClickTool.FOOD))
+	if tool_sleep_spot_btn:
+		tool_sleep_spot_btn.pressed.connect(func(): set_active_click_tool(ClickTool.SLEEP_SPOT))
+	if tool_rec_spot_btn:
+		tool_rec_spot_btn.pressed.connect(func(): set_active_click_tool(ClickTool.RECREATION_SPOT))
+
+	if place_center_sleep_btn:
+		place_center_sleep_btn.pressed.connect(func():
+			spawn_sleep_spot(arena_size * 0.5)
+		)
+	if clear_sleep_spots_btn:
+		clear_sleep_spots_btn.pressed.connect(clear_all_sleep_spots)
+
+	if place_center_rec_btn:
+		place_center_rec_btn.pressed.connect(func():
+			spawn_recreation_spot(arena_size * 0.5)
+		)
+	if clear_rec_spots_btn:
+		clear_rec_spots_btn.pressed.connect(clear_all_recreation_spots)
+
 	# Food controls
 	if food_amount_slider:
 		food_amount_slider.value = food_drop_amount
@@ -1311,9 +1435,6 @@ func _connect_ui_signals() -> void:
 	var f200 = get_node_or_null("%Food200Btn")
 	if f200: f200.pressed.connect(func(): _set_food_drop_amount(200.0))
 
-<<<<<<< Updated upstream
-	# Right growth panel controls
-=======
 	# Unified Left & Right panel tabs + retract controls
 	if retract_left_panel_btn:
 		retract_left_panel_btn.pressed.connect(func():
@@ -1360,7 +1481,6 @@ func _connect_ui_signals() -> void:
 	if edit_night_sliders_btn:
 		edit_night_sliders_btn.pressed.connect(func(): set_editing_time_of_day(TimeOfDay.NIGHT))
 
->>>>>>> Stashed changes
 	if master_scale_slider:
 		master_scale_slider.value_changed.connect(_on_master_scale_changed)
 
@@ -1373,8 +1493,6 @@ func _connect_ui_signals() -> void:
 	if fast_growth_btn:
 		fast_growth_btn.pressed.connect(func(): set_all_growth_rates(3.0))
 
-<<<<<<< Updated upstream
-=======
 	# Sleeping tab presets
 	if sleep_freeze_btn:
 		sleep_freeze_btn.pressed.connect(func(): set_all_sleeping_growth_rates(0.0))
@@ -1448,7 +1566,6 @@ func _connect_ui_signals() -> void:
 	if toggle_all_ui_btn:
 		toggle_all_ui_btn.pressed.connect(toggle_all_ui)
 
->>>>>>> Stashed changes
 func _on_speed_slider_changed(value: float) -> void:
 	current_speed = value
 	if speed_val_label:
@@ -1458,5 +1575,6 @@ func _on_speed_slider_changed(value: float) -> void:
 			child.move_speed = current_speed
 
 func _reset_camera() -> void:
+	select_npc(null)
 	camera.position = arena_size * 0.5
 	camera.zoom = Vector2.ONE

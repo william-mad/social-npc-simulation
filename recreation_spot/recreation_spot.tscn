@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://recreation_spot/recreation_spot.gd" id="1_recreation_spot"]
+
+[node name="RecreationSpot" type="Node2D" groups=["recreation_spots"]]
+script = ExtResource("1_recreation_spot")
