@@ -7,6 +7,35 @@ signal died(npc: NPC)
 signal foraging_completed(pos: Vector2, amount: float)
 
 const HUNGRY_THRESHOLD: float = 40.0
+const SLEEP_COLLAPSE_THRESHOLD: float = 88.0
+const TIRED_COLLAPSE_THRESHOLD: float = 90.0
+const SLEEP_URGENT_SEEK_THRESHOLD: float = 70.0
+const TIRED_URGENT_SEEK_THRESHOLD: float = 74.0
+const SLEEP_SEEK_THRESHOLD: float = 50.0
+const TIRED_SEEK_THRESHOLD: float = 55.0
+const BOREDOM_REC_SEEK_THRESHOLD: float = 40.0
+
+const DEFAULT_SLEEPING_RATES: Dictionary = {
+	"hunger": 0.3,
+	"sleep_need": -18.0,
+	"talk_need": 0.2,
+	"tired": -22.0,
+	"boredom": 0.0,
+	"lust": 0.2,
+	"purpose": 0.2,
+	"fight": -2.0
+}
+
+const DEFAULT_RECREATION_RATES: Dictionary = {
+	"hunger": 0.8,
+	"sleep_need": 0.6,
+	"talk_need": -4.0,
+	"tired": 2.0,
+	"boredom": -22.0,
+	"lust": 0.4,
+	"purpose": -2.0,
+	"fight": -3.0
+}
 
 # ==============================================================================
 # HEALTH (0 to 100)
@@ -87,6 +116,10 @@ const HUNGRY_THRESHOLD: float = 40.0
 @export var lust_rate: float = 1.0
 @export var purpose_rate: float = 1.0
 @export var fight_rate: float = 1.0
+
+# Growth rates applied while in NPCState.SLEEPING or NPCState.IN_RECREATION (pts/sec)
+var sleeping_growth_rates: Dictionary = DEFAULT_SLEEPING_RATES.duplicate()
+var recreation_growth_rates: Dictionary = DEFAULT_RECREATION_RATES.duplicate()
 
 # ==============================================================================
 # VISUAL CONFIGURATION
@@ -213,7 +246,10 @@ const NEED_DEFINITIONS: Array[Dictionary] = [
 enum NPCState {
 	WANDER,
 	SEEKING_FOOD,
+	SEEKING_SLEEP_SPOT,
 	SLEEPING,
+	SEEKING_RECREATION,
+	IN_RECREATION,
 	SEEKING_SOCIAL,
 	IN_CONVERSATION,
 	PURSUING_PURPOSE,
@@ -291,6 +327,15 @@ var boredom_branch: String = "Spin"
 var orbit_angle: float = 0.0
 var flee_target: NPC = null
 var flee_timer: float = 0.0
+
+# Sleep spot state
+var target_sleep_spot: SleepSpot = null
+var in_sleep_spot: bool = false
+
+# Recreation spot state
+var target_recreation_spot: RecreationSpot = null
+var in_recreation_spot: bool = false
+var recreation_sway_time: float = 0.0
 
 # Social / Dyadic Conversation state (Talk / Lust / Fight Averaging Engine)
 var social_partner: NPC = null
@@ -412,10 +457,18 @@ func _process_passive_growth(delta: float) -> void:
 	if is_dead:
 		return
 
+	var sleeping_now: bool = (current_state == NPCState.SLEEPING)
+	var recreating_now: bool = (current_state == NPCState.IN_RECREATION)
 	var needs_redraw: bool = false
 	for need in NEED_DEFINITIONS:
 		var prop: String = need["prop"]
-		var rate: float = get(need["rate_prop"])
+		var rate: float
+		if sleeping_now:
+			rate = sleeping_growth_rates.get(prop, 0.0)
+		elif recreating_now:
+			rate = recreation_growth_rates.get(prop, 0.0)
+		else:
+			rate = get(need["rate_prop"])
 		# Personality weight subtly scales positive build-up rates
 		var p_weight: float = personality_weights.get(prop, 1.0)
 		var effective_rate: float = rate * (p_weight if rate > 0.0 else 1.0)
@@ -429,8 +482,15 @@ func _process_passive_growth(delta: float) -> void:
 					needs_redraw = true
 
 	# Starvation damage when hunger == 100
-	if hunger >= 100.0 and hunger_rate > 0.0:
-		var health_loss: float = hunger_rate * delta
+	var active_hunger_rate: float
+	if sleeping_now:
+		active_hunger_rate = sleeping_growth_rates.get("hunger", 0.0)
+	elif recreating_now:
+		active_hunger_rate = recreation_growth_rates.get("hunger", 0.0)
+	else:
+		active_hunger_rate = hunger_rate
+	if hunger >= 100.0 and active_hunger_rate > 0.0:
+		var health_loss: float = active_hunger_rate * delta
 		var new_health: float = clampf(health - health_loss, 0.0, 100.0)
 		if new_health != health:
 			health = new_health
@@ -465,9 +525,30 @@ func _physics_process(delta: float) -> void:
 	# 3. If sleeping, continue until rested (unless starving emergency)
 	if current_state == NPCState.SLEEPING:
 		if hunger >= 92.0 and _find_nearest_food() != null:
+			_release_sleep_spot()
 			current_state = NPCState.SEEKING_FOOD
+			state_label_text = "Starving! Seeking Food"
 		else:
 			_process_sleeping(delta)
+			return
+
+	# 3b. If relaxing in a recreation spot, continue until entertained (unless survival emergency)
+	if current_state == NPCState.IN_RECREATION:
+		if hunger >= 60.0 and _find_nearest_food() != null:
+			_release_recreation_spot()
+			current_state = NPCState.SEEKING_FOOD
+			state_label_text = "Seeking Food"
+		elif sleep_need >= SLEEP_COLLAPSE_THRESHOLD or tired >= TIRED_COLLAPSE_THRESHOLD:
+			_release_recreation_spot()
+			current_state = NPCState.SLEEPING
+			state_label_text = "Collapsed (Sleeping)"
+			return
+		elif (sleep_need >= SLEEP_URGENT_SEEK_THRESHOLD or tired >= TIRED_URGENT_SEEK_THRESHOLD) and _find_nearest_sleep_spot() != null:
+			_release_recreation_spot()
+			current_state = NPCState.SEEKING_SLEEP_SPOT
+			state_label_text = "Seeking Sleep Spot!"
+		else:
+			_process_in_recreation(delta)
 			return
 
 	# 4. Evaluate Utility Brain periodically to pick winning directive
@@ -485,6 +566,10 @@ func _physics_process(delta: float) -> void:
 			else:
 				_evaluate_utility_brain()
 				_handle_movement(delta)
+		NPCState.SEEKING_SLEEP_SPOT:
+			_process_sleep_spot_seeking(delta)
+		NPCState.SEEKING_RECREATION:
+			_process_recreation_seeking(delta)
 		NPCState.SEEKING_SOCIAL:
 			_process_social_seeking(delta)
 		NPCState.PURSUING_PURPOSE:
@@ -497,27 +582,58 @@ func _physics_process(delta: float) -> void:
 ## Evaluates all 8 needs using Priority Bucketing + Utility Curves
 func _evaluate_utility_brain() -> void:
 	var has_food_available: bool = (_find_nearest_food() != null)
+	var available_sleep_spot: SleepSpot = _find_nearest_sleep_spot()
+	var has_sleep_spot_available: bool = (available_sleep_spot != null)
+	var available_rec_spot: RecreationSpot = _find_nearest_recreation_spot()
+	var has_rec_spot_available: bool = (available_rec_spot != null)
 
 	# BUCKET 1: Critical Survival Emergency (Starving or Exhaustion Collapse)
 	if (hunger >= 75.0 or (is_hungry() and hunger >= 55.0)) and has_food_available:
+		_release_sleep_spot()
+		_release_recreation_spot()
 		current_state = NPCState.SEEKING_FOOD
 		state_label_text = "Rushing to Food!" if fight >= 60.0 else "Seeking Food"
 		return
 
-	if sleep_need >= 88.0 or tired >= 90.0:
-		current_state = NPCState.SLEEPING
-		state_label_text = "Exhausted (Sleeping)"
+	if sleep_need >= SLEEP_COLLAPSE_THRESHOLD or tired >= TIRED_COLLAPSE_THRESHOLD:
+		_release_recreation_spot()
+		if in_sleep_spot and is_instance_valid(target_sleep_spot):
+			current_state = NPCState.SLEEPING
+			state_label_text = "Sleeping (Spot)"
+		elif is_instance_valid(target_sleep_spot) and target_sleep_spot.reserve_slot(self) != -1 and global_position.distance_to(target_sleep_spot.get_slot_world_position(self)) <= 24.0:
+			global_position = target_sleep_spot.get_slot_world_position(self)
+			in_sleep_spot = true
+			current_state = NPCState.SLEEPING
+			state_label_text = "Sleeping (Spot)"
+			target_sleep_spot.notify_visual_update()
+		else:
+			_release_sleep_spot()
+			current_state = NPCState.SLEEPING
+			state_label_text = "Collapsed (Sleeping)"
+		return
+
+	# Proactively seek a Sleep Spot when getting drowsy, before collapsing
+	if (sleep_need >= SLEEP_URGENT_SEEK_THRESHOLD or tired >= TIRED_URGENT_SEEK_THRESHOLD) and has_sleep_spot_available:
+		_release_recreation_spot()
+		current_state = NPCState.SEEKING_SLEEP_SPOT
+		state_label_text = "Seeking Sleep Spot!"
 		return
 
 	# Score all candidate directives via Utility Curves
 	var u_hunger: float = get_drive_utility("hunger") if (is_hungry() and has_food_available) else 0.0
-	var u_rest: float = maxf(get_drive_utility("sleep_need"), get_drive_utility("tired")) if (sleep_need >= 60.0 or tired >= 65.0) else 0.0
+	var u_rest: float = 0.0
+	if has_sleep_spot_available and (sleep_need >= SLEEP_SEEK_THRESHOLD or tired >= TIRED_SEEK_THRESHOLD):
+		u_rest = maxf(get_drive_utility("sleep_need"), get_drive_utility("tired")) * 1.25
 	var u_social: float = maxf(get_drive_utility("talk_need"), maxf(get_drive_utility("lust"), get_drive_utility("fight")))
 	if social_cooldown > 0.0 or maxf(talk_need, maxf(lust, fight)) < 38.0:
 		u_social *= 0.25
 
 	var u_purpose: float = get_drive_utility("purpose") if purpose >= 35.0 else 0.0
-	var u_boredom: float = get_drive_utility("boredom") if boredom >= 45.0 else 0.0
+	var u_boredom: float = 0.0
+	if has_rec_spot_available and boredom >= BOREDOM_REC_SEEK_THRESHOLD:
+		u_boredom = get_drive_utility("boredom") * 1.25
+	elif boredom >= 45.0:
+		u_boredom = get_drive_utility("boredom")
 
 	# Find highest utility winner
 	var best_u: float = 0.28 # Minimum threshold to leave idle wander
@@ -528,7 +644,7 @@ func _evaluate_utility_brain() -> void:
 		best_state = NPCState.SEEKING_FOOD
 	if u_rest > best_u:
 		best_u = u_rest
-		best_state = NPCState.SLEEPING
+		best_state = NPCState.SEEKING_SLEEP_SPOT
 	if u_social > best_u:
 		best_u = u_social
 		best_state = NPCState.SEEKING_SOCIAL
@@ -537,7 +653,12 @@ func _evaluate_utility_brain() -> void:
 		best_state = NPCState.PURSUING_PURPOSE
 	if u_boredom > best_u:
 		best_u = u_boredom
-		best_state = NPCState.RELIEVING_BOREDOM
+		best_state = NPCState.SEEKING_RECREATION if has_rec_spot_available else NPCState.RELIEVING_BOREDOM
+
+	if best_state != NPCState.SEEKING_SLEEP_SPOT and best_state != NPCState.SLEEPING:
+		_release_sleep_spot()
+	if best_state != NPCState.SEEKING_RECREATION and best_state != NPCState.IN_RECREATION:
+		_release_recreation_spot()
 
 	current_state = best_state
 
@@ -545,8 +666,14 @@ func _evaluate_utility_brain() -> void:
 	match current_state:
 		NPCState.SEEKING_FOOD:
 			state_label_text = "Aggressive Forage" if fight >= 60.0 else "Seeking Food"
+		NPCState.SEEKING_SLEEP_SPOT:
+			state_label_text = "Seeking Sleep Spot"
 		NPCState.SLEEPING:
-			state_label_text = "Sleeping (Zzz)"
+			state_label_text = "Sleeping (Spot)" if in_sleep_spot else "Collapsed (Sleeping)"
+		NPCState.SEEKING_RECREATION:
+			state_label_text = "Seeking Recreation"
+		NPCState.IN_RECREATION:
+			state_label_text = "Recreation (Spot)"
 		NPCState.SEEKING_SOCIAL:
 			if fight >= lust and fight >= talk_need and fight >= 50.0:
 				state_label_text = "Looking for a Fight"
@@ -577,19 +704,214 @@ func _evaluate_utility_brain() -> void:
 # ==============================================================================
 # BRANCHING EXECUTION FOR SLEEP, PURPOSE, BOREDOM & FLEEING
 # ==============================================================================
+func _find_nearest_sleep_spot() -> SleepSpot:
+	if not is_inside_tree():
+		return null
+	if is_instance_valid(target_sleep_spot) and target_sleep_spot.can_accept(self):
+		return target_sleep_spot
+	var tree = get_tree()
+	if tree == null:
+		return null
+	var spots = tree.get_nodes_in_group("sleep_spots")
+	if spots.is_empty():
+		return null
+
+	var nearest: SleepSpot = null
+	var min_dist_sq: float = INF
+	for s in spots:
+		if is_instance_valid(s) and s is SleepSpot and (s as SleepSpot).can_accept(self):
+			var d_sq: float = global_position.distance_squared_to(s.global_position)
+			if d_sq < min_dist_sq:
+				min_dist_sq = d_sq
+				nearest = s as SleepSpot
+	return nearest
+
+func _release_sleep_spot() -> void:
+	var prev_spot: SleepSpot = target_sleep_spot
+	target_sleep_spot = null
+	in_sleep_spot = false
+	if is_instance_valid(prev_spot):
+		prev_spot.release_slot(self)
+
+func on_sleep_spot_removed(spot: SleepSpot) -> void:
+	if target_sleep_spot != spot:
+		return
+	target_sleep_spot = null
+	in_sleep_spot = false
+	if current_state == NPCState.SEEKING_SLEEP_SPOT:
+		current_state = NPCState.WANDER
+		_evaluate_utility_brain()
+	elif current_state == NPCState.SLEEPING:
+		state_label_text = "Collapsed (Sleeping)"
+		queue_redraw()
+
+func _process_sleep_spot_seeking(delta: float) -> void:
+	# If exhaustion crosses collapsing threshold en route, collapse immediately
+	if sleep_need >= SLEEP_COLLAPSE_THRESHOLD or tired >= TIRED_COLLAPSE_THRESHOLD:
+		if is_instance_valid(target_sleep_spot) and target_sleep_spot.reserve_slot(self) != -1 and global_position.distance_to(target_sleep_spot.get_slot_world_position(self)) <= 24.0:
+			global_position = target_sleep_spot.get_slot_world_position(self)
+			velocity = Vector2.ZERO
+			in_sleep_spot = true
+			current_state = NPCState.SLEEPING
+			state_label_text = "Sleeping (Spot)"
+			target_sleep_spot.notify_visual_update()
+			queue_redraw()
+			return
+		_release_sleep_spot()
+		velocity = Vector2.ZERO
+		current_state = NPCState.SLEEPING
+		state_label_text = "Collapsed (Sleeping)"
+		queue_redraw()
+		return
+
+	if not is_instance_valid(target_sleep_spot) or not target_sleep_spot.can_accept(self):
+		_release_sleep_spot()
+		target_sleep_spot = _find_nearest_sleep_spot()
+
+	if target_sleep_spot == null:
+		current_state = NPCState.WANDER
+		_evaluate_utility_brain()
+		_handle_movement(delta)
+		return
+
+	if target_sleep_spot.reserve_slot(self) == -1:
+		target_sleep_spot = null
+		_evaluate_utility_brain()
+		_handle_movement(delta)
+		return
+
+	var slot_pos: Vector2 = target_sleep_spot.get_slot_world_position(self)
+	var to_slot: Vector2 = slot_pos - global_position
+	if to_slot.length() <= 8.0:
+		global_position = slot_pos
+		velocity = Vector2.ZERO
+		in_sleep_spot = true
+		current_state = NPCState.SLEEPING
+		state_label_text = "Sleeping (Spot)"
+		target_sleep_spot.notify_visual_update()
+		queue_redraw()
+	else:
+		var spd_mult: float = 0.85 if tired >= 75.0 else 1.05
+		velocity = to_slot.normalized() * (move_speed * spd_mult)
+		move_and_slide()
+		_enforce_arena_bounds()
+
 func _process_sleeping(delta: float) -> void:
 	velocity = Vector2.ZERO
-	# Actively relieve Sleep and Tired while resting
-	sleep_need = clampf(sleep_need - 18.0 * delta, 0.0, 100.0)
-	tired = clampf(tired - 22.0 * delta, 0.0, 100.0)
-	# Slight health recovery while resting if not starving
+	if in_sleep_spot:
+		if is_instance_valid(target_sleep_spot) and target_sleep_spot.get_slot_index(self) >= 0:
+			var slot_pos: Vector2 = target_sleep_spot.get_slot_world_position(self)
+			global_position = global_position.lerp(slot_pos, minf(1.0, 12.0 * delta))
+		else:
+			in_sleep_spot = false
+			target_sleep_spot = null
+			state_label_text = "Collapsed (Sleeping)"
+
+	# Slight health recovery while resting if not starving (better in a sleep spot)
 	if hunger < 85.0 and health < 100.0:
-		health = clampf(health + 2.5 * delta, 0.0, 100.0)
+		var heal_rate: float = 3.5 if in_sleep_spot else 2.0
+		health = clampf(health + heal_rate * delta, 0.0, 100.0)
 
 	if sleep_need <= 12.0 and tired <= 15.0:
+		var was_in_spot: bool = in_sleep_spot
+		_release_sleep_spot()
 		current_state = NPCState.WANDER
 		state_label_text = "Refreshed!"
-		add_memory("Woke up feeling refreshed")
+		add_memory("Woke up refreshed in a sleep spot" if was_in_spot else "Woke up feeling refreshed")
+	queue_redraw()
+
+func _find_nearest_recreation_spot() -> RecreationSpot:
+	if not is_inside_tree():
+		return null
+	if is_instance_valid(target_recreation_spot) and target_recreation_spot.can_accept(self):
+		return target_recreation_spot
+	var tree = get_tree()
+	if tree == null:
+		return null
+	var spots = tree.get_nodes_in_group("recreation_spots")
+	if spots.is_empty():
+		return null
+
+	var nearest: RecreationSpot = null
+	var min_dist_sq: float = INF
+	for s in spots:
+		if is_instance_valid(s) and s is RecreationSpot and (s as RecreationSpot).can_accept(self):
+			var d_sq: float = global_position.distance_squared_to(s.global_position)
+			if d_sq < min_dist_sq:
+				min_dist_sq = d_sq
+				nearest = s as RecreationSpot
+	return nearest
+
+func _release_recreation_spot() -> void:
+	var prev_spot: RecreationSpot = target_recreation_spot
+	target_recreation_spot = null
+	in_recreation_spot = false
+	if is_instance_valid(prev_spot):
+		prev_spot.release_slot(self)
+
+func on_recreation_spot_removed(spot: RecreationSpot) -> void:
+	if target_recreation_spot != spot:
+		return
+	target_recreation_spot = null
+	in_recreation_spot = false
+	if current_state == NPCState.SEEKING_RECREATION or current_state == NPCState.IN_RECREATION:
+		current_state = NPCState.WANDER
+		_evaluate_utility_brain()
+		queue_redraw()
+
+func _process_recreation_seeking(delta: float) -> void:
+	if not is_instance_valid(target_recreation_spot) or not target_recreation_spot.can_accept(self):
+		_release_recreation_spot()
+		target_recreation_spot = _find_nearest_recreation_spot()
+
+	if target_recreation_spot == null:
+		current_state = NPCState.WANDER
+		_evaluate_utility_brain()
+		_handle_movement(delta)
+		return
+
+	if target_recreation_spot.reserve_slot(self) == -1:
+		target_recreation_spot = null
+		_evaluate_utility_brain()
+		_handle_movement(delta)
+		return
+
+	var slot_pos: Vector2 = target_recreation_spot.get_slot_world_position(self)
+	var to_slot: Vector2 = slot_pos - global_position
+	if to_slot.length() <= 8.0:
+		global_position = slot_pos
+		velocity = Vector2.ZERO
+		in_recreation_spot = true
+		recreation_sway_time = randf() * TAU
+		current_state = NPCState.IN_RECREATION
+		state_label_text = "Recreation (Spot)"
+		target_recreation_spot.notify_visual_update()
+		queue_redraw()
+	else:
+		var spd_mult: float = 0.85 if tired >= 75.0 else 1.15
+		velocity = to_slot.normalized() * (move_speed * spd_mult)
+		move_and_slide()
+		_enforce_arena_bounds()
+
+func _process_in_recreation(delta: float) -> void:
+	velocity = Vector2.ZERO
+	if not is_instance_valid(target_recreation_spot) or target_recreation_spot.get_slot_index(self) < 0:
+		_release_recreation_spot()
+		current_state = NPCState.WANDER
+		_evaluate_utility_brain()
+		return
+
+	recreation_sway_time += delta * 3.0
+	var slot_pos: Vector2 = target_recreation_spot.get_slot_world_position(self)
+	var sway := Vector2(cos(recreation_sway_time), sin(recreation_sway_time * 1.3)) * 2.5
+	global_position = global_position.lerp(slot_pos + sway, minf(1.0, 10.0 * delta))
+
+	if boredom <= 12.0:
+		_release_recreation_spot()
+		current_state = NPCState.WANDER
+		state_label_text = "Entertained!"
+		add_memory("Relaxed at a recreation spot")
+		_evaluate_utility_brain()
 	queue_redraw()
 
 func _process_purpose_behavior(delta: float) -> void:
@@ -698,7 +1020,7 @@ func _find_best_social_partner() -> NPC:
 		if node == self or not is_instance_valid(node) or not (node is NPC):
 			continue
 		var other: NPC = node as NPC
-		if other.is_dead or other.current_state == NPCState.IN_CONVERSATION or other.current_state == NPCState.SLEEPING:
+		if other.is_dead or other.current_state == NPCState.IN_CONVERSATION or other.current_state == NPCState.SLEEPING or other.current_state == NPCState.IN_RECREATION:
 			continue
 		if other.social_cooldown > 0.0:
 			continue
@@ -774,11 +1096,15 @@ func _initiate_dyadic_interaction(partner: NPC) -> void:
 			if gap_fight >= 38.0 and minf(fight, partner.fight) < 35.0:
 				var coward: NPC = self if fight < partner.fight else partner
 				var bully: NPC = partner if coward == self else self
+				coward._release_sleep_spot()
+				coward._release_recreation_spot()
 				coward.current_state = NPCState.FLEEING
 				coward.flee_target = bully
 				coward.flee_timer = 2.6
 				coward.state_label_text = "Fleeing from %s!" % bully.personality_name
 				coward.add_memory("Fled from a brawl!")
+				bully._release_sleep_spot()
+				bully._release_recreation_spot()
 				bully.fight = clampf(bully.fight - 15.0, 0.0, 100.0)
 				bully.purpose = clampf(bully.purpose - 8.0, 0.0, 100.0)
 				bully.state_label_text = "Intimidated rival!"
@@ -792,6 +1118,8 @@ func _initiate_dyadic_interaction(partner: NPC) -> void:
 	partner._enter_conversation_lock(self, chosen_topic, branch, rate_value, topic_col, duration)
 
 func _enter_conversation_lock(partner: NPC, topic: String, branch: String, val_rate: float, col: Color, duration: float) -> void:
+	_release_sleep_spot()
+	_release_recreation_spot()
 	current_state = NPCState.IN_CONVERSATION
 	social_partner = partner
 	conversation_topic = topic
@@ -1017,6 +1345,8 @@ func _pick_new_wander() -> void:
 func die() -> void:
 	if is_dead:
 		return
+	_release_sleep_spot()
+	_release_recreation_spot()
 	is_dead = true
 	remove_from_group("npcs")
 	died.emit(self)
@@ -1037,6 +1367,9 @@ func die() -> void:
 	tween.chain().tween_callback(queue_free)
 
 func randomize_needs() -> void:
+	_release_sleep_spot()
+	_release_recreation_spot()
+	current_state = NPCState.WANDER
 	health = 100.0
 	hunger = randf_range(15.0, 65.0)
 	sleep_need = randf_range(10.0, 75.0)
@@ -1058,6 +1391,36 @@ func set_need_rate(prop_name: String, rate: float) -> void:
 func set_all_rates(rate: float) -> void:
 	for need in NEED_DEFINITIONS:
 		set(need["rate_prop"], rate)
+
+func set_sleeping_need_rate(prop_name: String, rate: float) -> void:
+	for need in NEED_DEFINITIONS:
+		if need["prop"] == prop_name or need["rate_prop"] == prop_name:
+			sleeping_growth_rates[need["prop"]] = rate
+			return
+
+func set_all_sleeping_rates(rate: float) -> void:
+	for need in NEED_DEFINITIONS:
+		sleeping_growth_rates[need["prop"]] = rate
+
+func reset_sleeping_rates_to_default(scale_mult: float = 1.0) -> void:
+	for need in NEED_DEFINITIONS:
+		var prop: String = need["prop"]
+		sleeping_growth_rates[prop] = DEFAULT_SLEEPING_RATES.get(prop, 0.0) * scale_mult
+
+func set_recreation_need_rate(prop_name: String, rate: float) -> void:
+	for need in NEED_DEFINITIONS:
+		if need["prop"] == prop_name or need["rate_prop"] == prop_name:
+			recreation_growth_rates[need["prop"]] = rate
+			return
+
+func set_all_recreation_rates(rate: float) -> void:
+	for need in NEED_DEFINITIONS:
+		recreation_growth_rates[need["prop"]] = rate
+
+func reset_recreation_rates_to_default(scale_mult: float = 1.0) -> void:
+	for need in NEED_DEFINITIONS:
+		var prop: String = need["prop"]
+		recreation_growth_rates[prop] = DEFAULT_RECREATION_RATES.get(prop, 0.0) * scale_mult
 
 # ==============================================================================
 # DRAWING (RADIAL BARS + SOCIAL CONNECTION LINE + STATE/PERSONALITY PILL)
@@ -1082,6 +1445,12 @@ func _draw() -> void:
 	if is_hungry() and not is_mouse_hovered:
 		var hungry_glow = Color(0.98, 0.52, 0.12, 0.85)
 		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, hungry_glow, active_width + 0.5, true)
+	elif current_state == NPCState.SLEEPING and not is_mouse_hovered:
+		var sleep_glow = Color(0.25, 0.48, 0.98, 0.9)
+		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, sleep_glow, active_width + 0.5, true)
+	elif current_state == NPCState.IN_RECREATION and not is_mouse_hovered:
+		var rec_glow = Color(0.95, 0.76, 0.16, 0.9)
+		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, rec_glow, active_width + 0.5, true)
 	else:
 		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, active_outline, active_width, true)
 
