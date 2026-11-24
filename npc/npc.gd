@@ -15,6 +15,20 @@ const SLEEP_SEEK_THRESHOLD: float = 50.0
 const TIRED_SEEK_THRESHOLD: float = 55.0
 const BOREDOM_REC_SEEK_THRESHOLD: float = 40.0
 
+enum Gender {
+	MALE,
+	FEMALE
+}
+
+enum RomanceInitiator {
+	BOTH,
+	MALE_ONLY,
+	FEMALE_ONLY
+}
+
+const MALE_INNER_COLOR: Color = Color(0.24, 0.56, 0.94, 1.0)
+const FEMALE_INNER_COLOR: Color = Color(0.92, 0.36, 0.66, 1.0)
+
 const DEFAULT_SLEEPING_RATES: Dictionary = {
 	"hunger": 0.3,
 	"sleep_need": -18.0,
@@ -23,7 +37,7 @@ const DEFAULT_SLEEPING_RATES: Dictionary = {
 	"boredom": 0.0,
 	"lust": 0.2,
 	"purpose": 0.2,
-	"fight": -2.0
+	"anger": -2.0
 }
 
 const DEFAULT_RECREATION_RATES: Dictionary = {
@@ -34,8 +48,25 @@ const DEFAULT_RECREATION_RATES: Dictionary = {
 	"boredom": -22.0,
 	"lust": 0.4,
 	"purpose": -2.0,
-	"fight": -3.0
+	"anger": -3.0
 }
+
+# ==============================================================================
+# IDENTITY (GENDER & NUMERIC NAME)
+# ==============================================================================
+@export_group("Identity")
+@export var npc_number: int = 0:
+	set(v):
+		npc_number = maxi(v, 0)
+		queue_redraw()
+
+@export var gender: Gender = Gender.MALE:
+	set(v):
+		gender = v
+		_gender_assigned = true
+		queue_redraw()
+
+var _gender_assigned: bool = false
 
 # ==============================================================================
 # HEALTH (0 to 100)
@@ -97,9 +128,9 @@ const DEFAULT_RECREATION_RATES: Dictionary = {
 		if is_mouse_hovered:
 			queue_redraw()
 
-@export_range(0.0, 100.0) var fight: float = 15.0:
+@export_range(0.0, 100.0) var anger: float = 15.0:
 	set(v):
-		fight = clampf(v, 0.0, 100.0)
+		anger = clampf(v, 0.0, 100.0)
 		if is_mouse_hovered:
 			queue_redraw()
 
@@ -115,7 +146,22 @@ const DEFAULT_RECREATION_RATES: Dictionary = {
 @export var boredom_rate: float = 1.0
 @export var lust_rate: float = 1.0
 @export var purpose_rate: float = 1.0
-@export var fight_rate: float = 1.0
+@export var anger_rate: float = 1.0
+
+# Max-need (100) penalty rates (pts/sec)
+@export_group("Max-Need Penalty Rates (pts/sec)")
+@export var max_hunger_health_drain_rate: float = 1.0
+@export var max_boredom_anger_rate: float = 2.0
+@export var max_purpose_anger_rate: float = 2.0
+@export var max_tired_anger_rate: float = 2.0
+
+# Gender multipliers & romance initiation rule
+var gender_scale_multiplier: float = 1.0
+var gender_need_multipliers: Dictionary = {
+	"hunger": 1.0, "sleep_need": 1.0, "talk_need": 1.0, "tired": 1.0,
+	"boredom": 1.0, "lust": 1.0, "purpose": 1.0, "anger": 1.0
+}
+var romance_initiator_mode: RomanceInitiator = RomanceInitiator.BOTH
 
 # Growth rates applied while in NPCState.SLEEPING or NPCState.IN_RECREATION (pts/sec)
 var sleeping_growth_rates: Dictionary = DEFAULT_SLEEPING_RATES.duplicate()
@@ -232,9 +278,9 @@ const NEED_DEFINITIONS: Array[Dictionary] = [
 	},
 	{
 		"id": 8,
-		"name": "Fight",
-		"prop": "fight",
-		"rate_prop": "fight_rate",
+		"name": "Anger",
+		"prop": "anger",
+		"rate_prop": "anger_rate",
 		"dir": Vector2(-0.70710678, -0.70710678), # NORTHWEST (10:30)
 		"color": Color(0.92, 0.2, 0.2) # Crimson Red
 	}
@@ -254,57 +300,65 @@ enum NPCState {
 	IN_CONVERSATION,
 	PURSUING_PURPOSE,
 	RELIEVING_BOREDOM,
+	ATTACKING,
 	FLEEING
+}
+
+enum AttackPhase {
+	CHASE,
+	WINDUP,
+	LUNGE,
+	RECOIL
 }
 
 const PERSONALITY_ARCHETYPES: Array[Dictionary] = [
 	{
 		"name": "Hot-Head",
 		"tint": Color(0.95, 0.32, 0.32),
-		"weights": {"hunger": 1.0, "sleep_need": 0.85, "talk_need": 0.9, "tired": 0.8, "boredom": 1.3, "lust": 1.0, "purpose": 0.8, "fight": 1.75},
-		"fight_c": 0.34, "lust_c": 0.55
+		"weights": {"hunger": 1.0, "sleep_need": 0.85, "talk_need": 0.9, "tired": 0.8, "boredom": 1.3, "lust": 1.0, "purpose": 0.8, "anger": 1.75},
+		"anger_c": 0.34, "lust_c": 0.55
 	},
 	{
 		"name": "Romantic",
 		"tint": Color(0.95, 0.42, 0.68),
-		"weights": {"hunger": 0.9, "sleep_need": 0.9, "talk_need": 1.35, "tired": 1.0, "boredom": 1.2, "lust": 1.75, "purpose": 0.75, "fight": 0.5},
-		"fight_c": 0.72, "lust_c": 0.32
+		"weights": {"hunger": 0.9, "sleep_need": 0.9, "talk_need": 1.35, "tired": 1.0, "boredom": 1.2, "lust": 1.75, "purpose": 0.75, "anger": 0.5},
+		"anger_c": 0.72, "lust_c": 0.32
 	},
 	{
 		"name": "Chatterbox",
 		"tint": Color(0.25, 0.85, 0.92),
-		"weights": {"hunger": 0.95, "sleep_need": 0.9, "talk_need": 1.8, "tired": 0.9, "boredom": 1.4, "lust": 1.1, "purpose": 0.85, "fight": 0.65},
-		"fight_c": 0.65, "lust_c": 0.48
+		"weights": {"hunger": 0.95, "sleep_need": 0.9, "talk_need": 1.8, "tired": 0.9, "boredom": 1.4, "lust": 1.1, "purpose": 0.85, "anger": 0.65},
+		"anger_c": 0.65, "lust_c": 0.48
 	},
 	{
 		"name": "Workaholic",
 		"tint": Color(0.28, 0.88, 0.52),
-		"weights": {"hunger": 0.85, "sleep_need": 0.75, "talk_need": 0.7, "tired": 0.75, "boredom": 0.6, "lust": 0.6, "purpose": 1.85, "fight": 0.9},
-		"fight_c": 0.58, "lust_c": 0.65
+		"weights": {"hunger": 0.85, "sleep_need": 0.75, "talk_need": 0.7, "tired": 0.75, "boredom": 0.6, "lust": 0.6, "purpose": 1.85, "anger": 0.9},
+		"anger_c": 0.58, "lust_c": 0.65
 	},
 	{
 		"name": "Glutton",
 		"tint": Color(0.98, 0.62, 0.22),
-		"weights": {"hunger": 1.8, "sleep_need": 1.2, "talk_need": 0.9, "tired": 1.25, "boredom": 1.1, "lust": 0.85, "purpose": 0.7, "fight": 0.85},
-		"fight_c": 0.55, "lust_c": 0.55
+		"weights": {"hunger": 1.8, "sleep_need": 1.2, "talk_need": 0.9, "tired": 1.25, "boredom": 1.1, "lust": 0.85, "purpose": 0.7, "anger": 0.85},
+		"anger_c": 0.55, "lust_c": 0.55
 	},
 	{
 		"name": "Sloth",
 		"tint": Color(0.58, 0.48, 0.92),
-		"weights": {"hunger": 1.0, "sleep_need": 1.75, "talk_need": 0.75, "tired": 1.7, "boredom": 0.7, "lust": 0.7, "purpose": 0.55, "fight": 0.45},
-		"fight_c": 0.78, "lust_c": 0.65
+		"weights": {"hunger": 1.0, "sleep_need": 1.75, "talk_need": 0.75, "tired": 1.7, "boredom": 0.7, "lust": 0.7, "purpose": 0.55, "anger": 0.45},
+		"anger_c": 0.78, "lust_c": 0.65
 	},
 	{
 		"name": "Hedonist",
 		"tint": Color(0.96, 0.78, 0.22),
-		"weights": {"hunger": 1.2, "sleep_need": 0.9, "talk_need": 1.3, "tired": 0.95, "boredom": 1.75, "lust": 1.5, "purpose": 0.5, "fight": 1.1},
-		"fight_c": 0.48, "lust_c": 0.36
+		"weights": {"hunger": 1.2, "sleep_need": 0.9, "talk_need": 1.3, "tired": 0.95, "boredom": 1.75, "lust": 1.5, "purpose": 0.5, "anger": 1.1},
+		"anger_c": 0.48, "lust_c": 0.36
 	},
 	{
 		"name": "Balanced",
 		"tint": Color(0.75, 0.82, 0.9),
-		"weights": {"hunger": 1.0, "sleep_need": 1.0, "talk_need": 1.0, "tired": 1.0, "boredom": 1.0, "lust": 1.0, "purpose": 1.0, "fight": 1.0},
-		"fight_c": 0.52, "lust_c": 0.52
+		"weights": {"hunger": 1.0, "sleep_need": 1.0, "talk_need": 1.0, "tired": 1.0, "boredom": 1.0, "lust": 1.0, "purpose": 1.0, "anger": 1.0},
+		"anger_c": 0.52, "lust_c": 0.52
 	}
 ]
 
@@ -312,9 +366,9 @@ var personality_name: String = "Balanced"
 var personality_tint: Color = Color(0.85, 0.88, 0.92)
 var personality_weights: Dictionary = {
 	"hunger": 1.0, "sleep_need": 1.0, "talk_need": 1.0, "tired": 1.0,
-	"boredom": 1.0, "lust": 1.0, "purpose": 1.0, "fight": 1.0
+	"boredom": 1.0, "lust": 1.0, "purpose": 1.0, "anger": 1.0
 }
-var fight_threshold: float = 0.52
+var anger_threshold: float = 0.52
 var lust_threshold: float = 0.52
 
 # State machine & branching variables
@@ -328,6 +382,20 @@ var orbit_angle: float = 0.0
 var flee_target: NPC = null
 var flee_timer: float = 0.0
 
+# Non-contractual headbutt combat & knockback state
+var attack_target: NPC = null
+var attack_phase: AttackPhase = AttackPhase.CHASE
+var attack_phase_timer: float = 0.0
+var strike_cooldown: float = 0.0
+var attack_cooldown: float = 0.0
+var lunge_dir: Vector2 = Vector2.RIGHT
+var lunge_hit_landed: bool = false
+var knockback_velocity: Vector2 = Vector2.ZERO
+var hit_flash_timer: float = 0.0
+var impact_fx_timer: float = 0.0
+var impact_fx_world_pos: Vector2 = Vector2.ZERO
+var floating_popups: Array[Dictionary] = []
+
 # Sleep spot state
 var target_sleep_spot: SleepSpot = null
 var in_sleep_spot: bool = false
@@ -337,7 +405,7 @@ var target_recreation_spot: RecreationSpot = null
 var in_recreation_spot: bool = false
 var recreation_sway_time: float = 0.0
 
-# Social / Dyadic Conversation state (Talk / Lust / Fight Averaging Engine)
+# Social / Dyadic Conversation state (Talk / Lust / Anger Averaging Engine)
 var social_partner: NPC = null
 var social_cooldown: float = 0.0
 var conversation_timer: float = 0.0
@@ -349,6 +417,11 @@ var affinities: Dictionary = {} # instance_id -> float [-100.0, 100.0]
 var recent_memories: Array[String] = [] # Bounded 8-slot memory log
 
 var is_mouse_hovered: bool = false
+var is_selected: bool = false:
+	set(v):
+		if is_selected != v:
+			is_selected = v
+			queue_redraw()
 var is_dead: bool = false
 var wander_timer: float = 0.0
 var wander_direction: Vector2 = Vector2.ZERO
@@ -366,9 +439,37 @@ func _ready() -> void:
 	if get_parent() == get_tree().root:
 		global_position = get_viewport_rect().size * 0.5
 
+	if not _gender_assigned:
+		assign_random_gender()
+	if npc_number <= 0:
+		npc_number = 1
+
 	assign_random_personality()
 	_pick_new_wander()
 	_pick_new_purpose_target()
+
+func assign_random_gender() -> void:
+	gender = Gender.MALE if (randi() % 2 == 0) else Gender.FEMALE
+
+func can_initiate_romance() -> bool:
+	match romance_initiator_mode:
+		RomanceInitiator.MALE_ONLY:
+			return gender == Gender.MALE
+		RomanceInitiator.FEMALE_ONLY:
+			return gender == Gender.FEMALE
+		_:
+			return true
+
+func set_gender_need_multiplier(prop_name: String, mult: float) -> void:
+	gender_need_multipliers[prop_name] = maxf(mult, 0.0)
+
+func set_gender_multipliers(scale_mult: float, per_need: Dictionary) -> void:
+	gender_scale_multiplier = maxf(scale_mult, 0.0)
+	for k in per_need:
+		gender_need_multipliers[k] = maxf(float(per_need[k]), 0.0)
+
+func get_display_name() -> String:
+	return "#%d" % npc_number
 
 func _update_collision_shape() -> void:
 	if collision_shape and collision_shape.shape is CircleShape2D:
@@ -380,7 +481,7 @@ func assign_random_personality() -> void:
 	personality_name = arch["name"]
 	personality_tint = arch["tint"]
 	body_outline_color = personality_tint
-	fight_threshold = clampf(arch["fight_c"] + randf_range(-0.06, 0.06), 0.22, 0.85)
+	anger_threshold = clampf(arch["anger_c"] + randf_range(-0.06, 0.06), 0.22, 0.85)
 	lust_threshold = clampf(arch["lust_c"] + randf_range(-0.06, 0.06), 0.22, 0.85)
 
 	var base_w: Dictionary = arch["weights"]
@@ -412,8 +513,12 @@ func get_drive_utility(prop: String) -> float:
 	var norm_rate: float = clampf((rate + 5.0) / 20.0, 0.0, 1.0)
 
 	# Blend accumulated state with immediate rate shock
-	var alpha: float = 0.65 if (prop in ["fight", "lust", "tired"]) else 0.85
-	var x: float = clampf(alpha * norm_tank + (1.0 - alpha) * norm_rate, 0.0, 1.0)
+	var x: float
+	if prop == "anger":
+		x = clampf(norm_tank + maxf(0.0, norm_rate - 0.3) * 0.35, 0.0, 1.0)
+	else:
+		var alpha: float = 0.65 if (prop in ["lust", "tired"]) else 0.85
+		x = clampf(alpha * norm_tank + (1.0 - alpha) * norm_rate, 0.0, 1.0)
 
 	var u: float = x
 	match prop:
@@ -424,9 +529,9 @@ func get_drive_utility(prop: String) -> float:
 			u = pow(x, 2.6)
 		"tired":
 			u = pow(x, 2.1)
-		"fight":
-			# Logistic Sigmoid curve governed by personality fight_threshold
-			u = 1.0 / (1.0 + exp(-12.0 * (x - fight_threshold)))
+		"anger":
+			# Logistic Sigmoid curve governed by personality anger_threshold
+			u = 1.0 / (1.0 + exp(-12.0 * (x - anger_threshold)))
 		"lust":
 			# Logistic Sigmoid curve governed by personality lust_threshold
 			u = 1.0 / (1.0 + exp(-11.0 * (x - lust_threshold)))
@@ -446,12 +551,39 @@ func _process(delta: float) -> void:
 
 	if social_cooldown > 0.0:
 		social_cooldown = maxf(0.0, social_cooldown - delta)
+	if attack_cooldown > 0.0:
+		attack_cooldown = maxf(0.0, attack_cooldown - delta)
+	if strike_cooldown > 0.0:
+		strike_cooldown = maxf(0.0, strike_cooldown - delta)
+
+	var fx_active: bool = false
+	if hit_flash_timer > 0.0:
+		hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
+		fx_active = true
+	if impact_fx_timer > 0.0:
+		impact_fx_timer = maxf(0.0, impact_fx_timer - delta)
+		fx_active = true
+	if not floating_popups.is_empty():
+		var i: int = floating_popups.size() - 1
+		while i >= 0:
+			var p: Dictionary = floating_popups[i]
+			p["life"] = float(p["life"]) - delta
+			p["pos"] = (p["pos"] as Vector2) + (p["vel"] as Vector2) * delta
+			if float(p["life"]) <= 0.0:
+				floating_popups.remove_at(i)
+			i -= 1
+		fx_active = true
 
 	if passive_growth_enabled:
 		_process_passive_growth(delta)
 
+	if fx_active:
+		queue_redraw()
+
 	_check_mouse_hover()
-	z_index = 100 if is_mouse_hovered else 0
+	if is_selected:
+		queue_redraw()
+	z_index = 100 if is_mouse_hovered else (90 if is_selected else 0)
 
 func _process_passive_growth(delta: float) -> void:
 	if is_dead:
@@ -469,9 +601,10 @@ func _process_passive_growth(delta: float) -> void:
 			rate = recreation_growth_rates.get(prop, 0.0)
 		else:
 			rate = get(need["rate_prop"])
-		# Personality weight subtly scales positive build-up rates
+		# Personality weight and gender multiplier scale positive build-up rates
 		var p_weight: float = personality_weights.get(prop, 1.0)
-		var effective_rate: float = rate * (p_weight if rate > 0.0 else 1.0)
+		var g_mult: float = gender_scale_multiplier * float(gender_need_multipliers.get(prop, 1.0))
+		var effective_rate: float = rate * (p_weight * g_mult if rate > 0.0 else 1.0)
 
 		if effective_rate != 0.0:
 			var cur_val: float = get(prop)
@@ -481,16 +614,33 @@ func _process_passive_growth(delta: float) -> void:
 				if is_mouse_hovered or (prop == "hunger" and new_val >= 40.0):
 					needs_redraw = true
 
-	# Starvation damage when hunger == 100
-	var active_hunger_rate: float
-	if sleeping_now:
-		active_hunger_rate = sleeping_growth_rates.get("hunger", 0.0)
-	elif recreating_now:
-		active_hunger_rate = recreation_growth_rates.get("hunger", 0.0)
-	else:
-		active_hunger_rate = hunger_rate
-	if hunger >= 100.0 and active_hunger_rate > 0.0:
-		var health_loss: float = active_hunger_rate * delta
+	# Max Boredom (100) raises Anger
+	if boredom >= 100.0 and max_boredom_anger_rate > 0.0:
+		var anger_from_boredom: float = clampf(anger + max_boredom_anger_rate * delta, 0.0, 100.0)
+		if anger_from_boredom != anger:
+			anger = anger_from_boredom
+			if is_mouse_hovered:
+				needs_redraw = true
+
+	# Max Purpose (100) raises Anger
+	if purpose >= 100.0 and max_purpose_anger_rate > 0.0:
+		var anger_from_purpose: float = clampf(anger + max_purpose_anger_rate * delta, 0.0, 100.0)
+		if anger_from_purpose != anger:
+			anger = anger_from_purpose
+			if is_mouse_hovered:
+				needs_redraw = true
+
+	# Max Tired (100) raises Anger
+	if tired >= 100.0 and max_tired_anger_rate > 0.0:
+		var anger_from_tired: float = clampf(anger + max_tired_anger_rate * delta, 0.0, 100.0)
+		if anger_from_tired != anger:
+			anger = anger_from_tired
+			if is_mouse_hovered:
+				needs_redraw = true
+
+	# Starvation damage when hunger == 100 (controlled by max_hunger_health_drain_rate)
+	if hunger >= 100.0 and max_hunger_health_drain_rate > 0.0:
+		var health_loss: float = max_hunger_health_drain_rate * delta
 		var new_health: float = clampf(health - health_loss, 0.0, 100.0)
 		if new_health != health:
 			health = new_health
@@ -512,12 +662,28 @@ func _physics_process(delta: float) -> void:
 	if not can_move or (pause_on_hover and is_mouse_hovered):
 		return
 
-	# 1. If locked in an active dyadic conversation/brawl, process it
+	# Apply any active physical knockback impulse first
+	if knockback_velocity.length_squared() > 4.0:
+		velocity = knockback_velocity
+		move_and_slide()
+		_enforce_arena_bounds()
+		knockback_velocity = knockback_velocity.move_toward(Vector2.ZERO, 880.0 * delta)
+		if knockback_velocity.length() > 90.0:
+			return
+	else:
+		knockback_velocity = Vector2.ZERO
+
+	# 1. If actively attacking (headbutting) a target, process physical combat
+	if current_state == NPCState.ATTACKING:
+		_process_attacking(delta)
+		return
+
+	# 1b. If locked in an active dyadic conversation, process it
 	if current_state == NPCState.IN_CONVERSATION:
 		_process_active_conversation(delta)
 		return
 
-	# 2. If actively fleeing a bully/brawler
+	# 2. If actively fleeing an attacker
 	if current_state == NPCState.FLEEING:
 		_process_fleeing(delta)
 		return
@@ -532,7 +698,7 @@ func _physics_process(delta: float) -> void:
 			_process_sleeping(delta)
 			return
 
-	# 3b. If relaxing in a recreation spot, continue until entertained (unless survival emergency)
+	# 3b. If relaxing in a recreation spot, continue until entertained (unless survival/anger emergency)
 	if current_state == NPCState.IN_RECREATION:
 		if hunger >= 60.0 and _find_nearest_food() != null:
 			_release_recreation_spot()
@@ -547,6 +713,13 @@ func _physics_process(delta: float) -> void:
 			_release_recreation_spot()
 			current_state = NPCState.SEEKING_SLEEP_SPOT
 			state_label_text = "Seeking Sleep Spot!"
+		elif anger >= 85.0 and attack_cooldown <= 0.0:
+			var target: NPC = _find_attack_target()
+			if target != null:
+				start_attack(target)
+				return
+			_process_in_recreation(delta)
+			return
 		else:
 			_process_in_recreation(delta)
 			return
@@ -592,7 +765,7 @@ func _evaluate_utility_brain() -> void:
 		_release_sleep_spot()
 		_release_recreation_spot()
 		current_state = NPCState.SEEKING_FOOD
-		state_label_text = "Rushing to Food!" if fight >= 60.0 else "Seeking Food"
+		state_label_text = "Rushing to Food!" if anger >= 60.0 else "Seeking Food"
 		return
 
 	if sleep_need >= SLEEP_COLLAPSE_THRESHOLD or tired >= TIRED_COLLAPSE_THRESHOLD:
@@ -624,9 +797,19 @@ func _evaluate_utility_brain() -> void:
 	var u_rest: float = 0.0
 	if has_sleep_spot_available and (sleep_need >= SLEEP_SEEK_THRESHOLD or tired >= TIRED_SEEK_THRESHOLD):
 		u_rest = maxf(get_drive_utility("sleep_need"), get_drive_utility("tired")) * 1.25
-	var u_social: float = maxf(get_drive_utility("talk_need"), maxf(get_drive_utility("lust"), get_drive_utility("fight")))
-	if social_cooldown > 0.0 or maxf(talk_need, maxf(lust, fight)) < 38.0:
+	var can_rom: bool = can_initiate_romance()
+	var u_lust_drive: float = get_drive_utility("lust") if can_rom else 0.0
+	var u_social: float = maxf(get_drive_utility("talk_need"), u_lust_drive)
+	var social_peak: float = maxf(talk_need, lust) if can_rom else talk_need
+	if social_cooldown > 0.0 or social_peak < 38.0:
 		u_social *= 0.25
+
+	var u_attack: float = 0.0
+	var candidate_target: NPC = null
+	if anger >= 48.0 and attack_cooldown <= 0.0:
+		candidate_target = _find_attack_target()
+		if candidate_target != null:
+			u_attack = get_drive_utility("anger") * 1.15
 
 	var u_purpose: float = get_drive_utility("purpose") if purpose >= 35.0 else 0.0
 	var u_boredom: float = 0.0
@@ -645,6 +828,9 @@ func _evaluate_utility_brain() -> void:
 	if u_rest > best_u:
 		best_u = u_rest
 		best_state = NPCState.SEEKING_SLEEP_SPOT
+	if u_attack > best_u:
+		best_u = u_attack
+		best_state = NPCState.ATTACKING
 	if u_social > best_u:
 		best_u = u_social
 		best_state = NPCState.SEEKING_SOCIAL
@@ -660,12 +846,16 @@ func _evaluate_utility_brain() -> void:
 	if best_state != NPCState.SEEKING_RECREATION and best_state != NPCState.IN_RECREATION:
 		_release_recreation_spot()
 
+	if best_state == NPCState.ATTACKING and candidate_target != null:
+		start_attack(candidate_target)
+		return
+
 	current_state = best_state
 
 	# Configure sub-branches based on secondary drives!
 	match current_state:
 		NPCState.SEEKING_FOOD:
-			state_label_text = "Aggressive Forage" if fight >= 60.0 else "Seeking Food"
+			state_label_text = "Aggressive Forage" if anger >= 60.0 else "Seeking Food"
 		NPCState.SEEKING_SLEEP_SPOT:
 			state_label_text = "Seeking Sleep Spot"
 		NPCState.SLEEPING:
@@ -675,9 +865,7 @@ func _evaluate_utility_brain() -> void:
 		NPCState.IN_RECREATION:
 			state_label_text = "Recreation (Spot)"
 		NPCState.SEEKING_SOCIAL:
-			if fight >= lust and fight >= talk_need and fight >= 50.0:
-				state_label_text = "Looking for a Fight"
-			elif lust >= talk_need and lust >= 50.0:
+			if can_initiate_romance() and lust >= talk_need and lust >= 50.0:
 				state_label_text = "Seeking Romance"
 			else:
 				state_label_text = "Seeking Chat"
@@ -689,10 +877,10 @@ func _evaluate_utility_brain() -> void:
 			else:
 				state_label_text = "Purpose: Working"
 		NPCState.RELIEVING_BOREDOM:
-			if fight >= 58.0:
+			if anger >= 58.0:
 				boredom_branch = "Rowdy"
 				state_label_text = "Bored: Rowdy Sprint"
-			elif talk_need >= 50.0 or lust >= 50.0:
+			elif talk_need >= 50.0 or (can_initiate_romance() and lust >= 50.0):
 				current_state = NPCState.SEEKING_SOCIAL
 				state_label_text = "Bored: Seeking Crowd"
 			else:
@@ -984,7 +1172,247 @@ func _process_fleeing(delta: float) -> void:
 	_enforce_arena_bounds()
 
 # ==============================================================================
-# TALK / LUST / FIGHT AVERAGING SOCIAL ENGINE
+# NON-CONTRACTUAL HEADBUTT COMBAT ENGINE
+# One NPC attacks unilaterally; victim takes chunk HP damage & retaliates only if anger is high enough
+# ==============================================================================
+func get_retaliation_threshold() -> float:
+	return clampf(anger_threshold * 75.0, 25.0, 55.0)
+
+func _interrupt_for_combat() -> void:
+	_release_sleep_spot()
+	_release_recreation_spot()
+	if current_state == NPCState.IN_CONVERSATION:
+		var prev_partner: NPC = social_partner
+		social_partner = null
+		current_state = NPCState.WANDER
+		if is_instance_valid(prev_partner) and not prev_partner.is_dead and prev_partner.current_state == NPCState.IN_CONVERSATION and prev_partner.social_partner == self:
+			prev_partner._end_conversation()
+
+func _find_attack_target() -> NPC:
+	if not is_inside_tree():
+		return null
+	var tree = get_tree()
+	if tree == null:
+		return null
+	var npcs = tree.get_nodes_in_group("npcs")
+	var best_npc: NPC = null
+	var best_score: float = -INF
+
+	for node in npcs:
+		if node == self or not is_instance_valid(node) or not (node is NPC):
+			continue
+		var other: NPC = node as NPC
+		if other.is_dead:
+			continue
+		var d: float = global_position.distance_to(other.global_position)
+		if d > 460.0:
+			continue
+		# Prefer nearby rivals (negative affinity) and close targets
+		var prior_aff: float = affinities.get(other.get_instance_id(), 0.0)
+		var score: float = (460.0 - d) * 0.25 - (prior_aff * 0.6)
+		if score > best_score:
+			best_score = score
+			best_npc = other
+	return best_npc
+
+func start_attack(target: NPC, is_retaliation: bool = false) -> void:
+	if not is_instance_valid(target) or target.is_dead or target == self:
+		return
+	_interrupt_for_combat()
+	attack_target = target
+	current_state = NPCState.ATTACKING
+	attack_phase = AttackPhase.CHASE
+	attack_phase_timer = 0.0
+	lunge_hit_landed = false
+	if is_retaliation:
+		strike_cooldown = maxf(strike_cooldown, 0.22)
+		state_label_text = "Fighting Back (#%d)!" % target.npc_number
+		add_memory("Retaliated against #%d" % target.npc_number)
+	else:
+		state_label_text = "Headbutting #%d!" % target.npc_number
+	queue_redraw()
+
+func _stop_attacking(cooldown_min: float = 2.5, cooldown_max: float = 4.5) -> void:
+	attack_target = null
+	attack_phase = AttackPhase.CHASE
+	attack_phase_timer = 0.0
+	lunge_hit_landed = false
+	attack_cooldown = randf_range(cooldown_min, cooldown_max)
+	current_state = NPCState.WANDER
+	_evaluate_utility_brain()
+	queue_redraw()
+
+func _process_attacking(delta: float) -> void:
+	if not is_instance_valid(attack_target) or attack_target.is_dead:
+		_stop_attacking(2.5, 4.0)
+		return
+
+	# Stop fighting if anger cooled off or exhausted (collapse threshold)
+	if anger <= 18.0 or tired >= TIRED_COLLAPSE_THRESHOLD or (hunger >= 92.0 and _find_nearest_food() != null):
+		_stop_attacking(2.5, 4.5)
+		return
+
+	var to_target: Vector2 = attack_target.global_position - global_position
+	var dist: float = to_target.length()
+	var dir_to_target: Vector2 = to_target.normalized() if dist > 0.001 else Vector2.RIGHT
+
+	if dist > 540.0 and attack_phase == AttackPhase.CHASE:
+		_stop_attacking(2.0, 3.5)
+		return
+
+	match attack_phase:
+		AttackPhase.CHASE:
+			state_label_text = "Charging #%d!" % attack_target.npc_number
+			var windup_range: float = body_radius + attack_target.body_radius + 36.0
+			if dist <= windup_range and strike_cooldown <= 0.0:
+				attack_phase = AttackPhase.WINDUP
+				attack_phase_timer = 0.16
+				lunge_dir = dir_to_target
+				state_label_text = "Windup -> #%d!" % attack_target.npc_number
+			else:
+				velocity = dir_to_target * (move_speed * 1.42)
+				move_and_slide()
+				_enforce_arena_bounds()
+
+		AttackPhase.WINDUP:
+			attack_phase_timer -= delta
+			lunge_dir = dir_to_target
+			# Coil backward slightly before ramming forward
+			velocity = -lunge_dir * maxf(move_speed * 0.85, 55.0)
+			move_and_slide()
+			_enforce_arena_bounds()
+			if attack_phase_timer <= 0.0:
+				attack_phase = AttackPhase.LUNGE
+				attack_phase_timer = 0.24
+				lunge_hit_landed = false
+				state_label_text = "HEADBUTT #%d!" % attack_target.npc_number
+
+		AttackPhase.LUNGE:
+			attack_phase_timer -= delta
+			var lunge_speed: float = maxf(move_speed * 4.2, 260.0)
+			velocity = lunge_dir * lunge_speed
+			move_and_slide()
+			_enforce_arena_bounds()
+
+			var contact_range: float = body_radius + attack_target.body_radius + 6.0
+			if not lunge_hit_landed and global_position.distance_to(attack_target.global_position) <= contact_range:
+				_land_headbutt(attack_target)
+				return
+
+			if attack_phase_timer <= 0.0:
+				attack_phase = AttackPhase.RECOIL
+				attack_phase_timer = 0.28
+				strike_cooldown = 0.25
+				velocity = Vector2.ZERO
+
+		AttackPhase.RECOIL:
+			attack_phase_timer -= delta
+			velocity = Vector2.ZERO
+			if attack_phase_timer <= 0.0:
+				if not is_instance_valid(attack_target) or attack_target.is_dead or anger <= 20.0:
+					_stop_attacking(2.5, 4.5)
+				else:
+					attack_phase = AttackPhase.CHASE
+					strike_cooldown = maxf(strike_cooldown, 0.2)
+
+	queue_redraw()
+
+func _land_headbutt(target: NPC) -> void:
+	lunge_hit_landed = true
+	var impact_dir: Vector2 = (target.global_position - global_position).normalized()
+	if impact_dir == Vector2.ZERO:
+		impact_dir = lunge_dir
+
+	# Discrete chunk damage (12 to 20 HP per headbutt)
+	var dmg: float = roundf(10.0 + (anger / 100.0) * 10.0)
+	var midpoint: Vector2 = (global_position + target.global_position) * 0.5
+
+	# Attacker physical recoil, anger vent & stamina cost
+	knockback_velocity = -impact_dir * 220.0
+	anger = clampf(anger - 18.0, 0.0, 100.0)
+	tired = clampf(tired + 7.0, 0.0, 100.0)
+	boredom = clampf(boredom - 8.0, 0.0, 100.0)
+	_shift_affinity(target, -15.0)
+
+	impact_fx_world_pos = midpoint
+	impact_fx_timer = 0.24
+	attack_phase = AttackPhase.RECOIL
+	attack_phase_timer = 0.42
+	strike_cooldown = 0.3
+
+	# Squash & stretch impact animation on attacker
+	var tw = create_tween()
+	tw.tween_property(self, "scale", Vector2(1.22, 0.8), 0.06).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property(self, "scale", Vector2.ONE, 0.14).set_trans(Tween.TRANS_BACK)
+
+	target.receive_headbutt(self, impact_dir, dmg, midpoint)
+
+	if not is_instance_valid(target) or target.is_dead:
+		add_memory("Knocked out #%d!" % target.npc_number)
+		_stop_attacking(3.0, 5.0)
+	else:
+		add_memory("Headbutted #%d (-%d HP)" % [target.npc_number, int(dmg)])
+	queue_redraw()
+
+func receive_headbutt(attacker: NPC, impact_dir: Vector2, damage: float, impact_pos: Vector2) -> void:
+	if is_dead:
+		return
+
+	# Apply discrete chunk of health loss
+	var actual_dmg: float = clampf(damage, 1.0, 100.0)
+	knockback_velocity = impact_dir * 270.0
+	hit_flash_timer = 0.24
+	impact_fx_world_pos = impact_pos
+	impact_fx_timer = 0.24
+	_spawn_floating_popup("-%d" % int(round(actual_dmg)), Color(1.0, 0.28, 0.24))
+
+	# Squash & stretch recoil
+	var tw = create_tween()
+	tw.tween_property(self, "scale", Vector2(0.78, 1.24), 0.06).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property(self, "scale", Vector2.ONE, 0.15).set_trans(Tween.TRANS_BACK)
+
+	tired = clampf(tired + 5.0, 0.0, 100.0)
+	anger = clampf(anger + 10.0, 0.0, 100.0)
+	if is_instance_valid(attacker):
+		_shift_affinity(attacker, -22.0)
+
+	health = clampf(health - actual_dmg, 0.0, 100.0)
+	if is_dead:
+		return
+
+	# Already fighting this attacker? Keep fighting after brief recoil!
+	if current_state == NPCState.ATTACKING and attack_target == attacker:
+		attack_phase = AttackPhase.RECOIL
+		attack_phase_timer = 0.26
+		strike_cooldown = 0.2
+		queue_redraw()
+		return
+
+	# Non-contractual reaction: attack back ONLY if anger is high enough, otherwise flee!
+	_interrupt_for_combat()
+	if is_instance_valid(attacker) and not attacker.is_dead:
+		if anger >= get_retaliation_threshold():
+			start_attack(attacker, true)
+		else:
+			current_state = NPCState.FLEEING
+			flee_target = attacker
+			flee_timer = 2.4
+			state_label_text = "Fleeing from #%d!" % attacker.npc_number
+			add_memory("Headbutted by #%d & fled" % attacker.npc_number)
+	queue_redraw()
+
+func _spawn_floating_popup(text: String, col: Color) -> void:
+	floating_popups.append({
+		"text": text,
+		"pos": Vector2(randf_range(-8.0, 8.0), -body_radius - 10.0),
+		"vel": Vector2(randf_range(-10.0, 10.0), -36.0),
+		"life": 0.75,
+		"max_life": 0.75,
+		"color": col
+	})
+
+# ==============================================================================
+# TALK / LUST / ANGER AVERAGING SOCIAL ENGINE
 # ==============================================================================
 func _process_social_seeking(delta: float) -> void:
 	if not is_instance_valid(social_partner) or social_partner.is_dead or social_partner.current_state == NPCState.IN_CONVERSATION:
@@ -1015,22 +1443,33 @@ func _find_best_social_partner() -> NPC:
 	var npcs = tree.get_nodes_in_group("npcs")
 	var best_npc: NPC = null
 	var best_score: float = -INF
+	var can_rom: bool = can_initiate_romance()
+	var seeking_romance: bool = (can_rom and lust >= talk_need and lust >= 50.0)
 
 	for node in npcs:
 		if node == self or not is_instance_valid(node) or not (node is NPC):
 			continue
 		var other: NPC = node as NPC
-		if other.is_dead or other.current_state == NPCState.IN_CONVERSATION or other.current_state == NPCState.SLEEPING or other.current_state == NPCState.IN_RECREATION:
+		if other.is_dead or other.current_state == NPCState.IN_CONVERSATION or other.current_state == NPCState.SLEEPING or other.current_state == NPCState.IN_RECREATION or other.current_state == NPCState.ATTACKING:
 			continue
 		if other.social_cooldown > 0.0:
+			continue
+
+		var opposite_gender: bool = (other.gender != gender)
+		# Lustful / romantic seeking only targets opposite gender (male <-> female)
+		if seeking_romance and not opposite_gender:
 			continue
 
 		var d: float = global_position.distance_to(other.global_position)
 		if d > 480.0:
 			continue
 
-		# Score partner by proximity + dyadic Talk/Lust/Fight average potential
-		var avg_social: float = ((talk_need + other.talk_need) + (lust + other.lust) + (fight + other.fight)) / 6.0
+		# Score partner by proximity + dyadic Talk/(Lust if allowed)/Anger average potential
+		var avg_social: float
+		if opposite_gender and can_rom:
+			avg_social = ((talk_need + other.talk_need) + (lust + other.lust) + (anger + other.anger)) / 6.0
+		else:
+			avg_social = ((talk_need + other.talk_need) + (anger + other.anger)) / 4.0
 		var prox_score: float = (480.0 - d) * 0.15
 		var score: float = avg_social + prox_score
 		if score > best_score:
@@ -1039,31 +1478,36 @@ func _find_best_social_partner() -> NPC:
 
 	return best_npc
 
-## Computes the Averages of Talk, Lust, and Fight to decide Conversation Topic, Value & Branch
+## Computes the Averages of Talk, Lust, and Anger to decide Conversation Topic, Value & Branch
 func _initiate_dyadic_interaction(partner: NPC) -> void:
 	if partner.current_state == NPCState.IN_CONVERSATION or partner.is_dead:
 		return
 
+	var opposite_gender: bool = (gender != partner.gender)
+	var allow_romance: bool = opposite_gender and can_initiate_romance()
+
 	# 1. Compute Pairwise Averages (0 to 100 scale) and Asymmetry Gaps
 	var avg_talk: float = (talk_need + partner.talk_need) * 0.5
-	var avg_lust: float = (lust + partner.lust) * 0.5
-	var avg_fight: float = (fight + partner.fight) * 0.5
+	var avg_lust: float = (lust + partner.lust) * 0.5 if allow_romance else 0.0
+	var avg_anger: float = (anger + partner.anger) * 0.5
 
 	var gap_talk: float = absf(talk_need - partner.talk_need)
 	var gap_lust: float = absf(lust - partner.lust)
-	var gap_fight: float = absf(fight - partner.fight)
+	var gap_anger: float = absf(anger - partner.anger)
 
 	var prior_affinity: float = affinities.get(partner.get_instance_id(), 0.0)
 
 	# 2. Score Conversation Topics using Single & Compound Averages
+	# Lustful interactions require Male-Female AND the initiator's gender must be allowed by romance_initiator_mode
 	var topic_scores: Dictionary = {
-		"Deep Chat":          avg_talk * (1.0 - (avg_lust + avg_fight) / 220.0),
-		"Flirty Banter":      (avg_talk + avg_lust) * 0.5,
-		"Passionate Romance": avg_lust * (1.0 - avg_fight / 140.0) + (prior_affinity * 0.15),
-		"Heated Debate":      (avg_talk + avg_fight) * 0.5,
-		"Jealous Drama":      (avg_lust + avg_fight) * 0.5,
-		"Brawl":              avg_fight * (1.0 - avg_talk / 220.0) - (prior_affinity * 0.15)
+		"Deep Chat":     avg_talk * (1.0 - (avg_lust + avg_anger) / 220.0),
+		"Heated Debate": (avg_talk + avg_anger) * 0.5,
+		"Brawl":         avg_anger * (1.0 - avg_talk / 220.0) - (prior_affinity * 0.15)
 	}
+	if allow_romance:
+		topic_scores["Flirty Banter"] = (avg_talk + avg_lust) * 0.5
+		topic_scores["Passionate Romance"] = avg_lust * (1.0 - avg_anger / 140.0) + (prior_affinity * 0.15)
+		topic_scores["Jealous Drama"] = (avg_lust + avg_anger) * 0.5
 
 	var chosen_topic: String = "Deep Chat"
 	var best_topic_val: float = -INF
@@ -1089,28 +1533,13 @@ func _initiate_dyadic_interaction(partner: NPC) -> void:
 			branch = "MUTUAL" if (gap_lust < 32.0 and prior_affinity >= -25.0) else "REJECTED"
 		"Heated Debate":
 			topic_col = Color(0.95, 0.76, 0.16) # Amber
-			branch = "MUTUAL" if gap_fight < 35.0 else "REJECTED"
+			branch = "MUTUAL" if gap_anger < 35.0 else "REJECTED"
 		"Jealous Drama", "Brawl":
-			topic_col = Color(0.92, 0.2, 0.2) # Crimson
-			# If one NPC has very low fight compared to the aggressor, they FLEE!
-			if gap_fight >= 38.0 and minf(fight, partner.fight) < 35.0:
-				var coward: NPC = self if fight < partner.fight else partner
-				var bully: NPC = partner if coward == self else self
-				coward._release_sleep_spot()
-				coward._release_recreation_spot()
-				coward.current_state = NPCState.FLEEING
-				coward.flee_target = bully
-				coward.flee_timer = 2.6
-				coward.state_label_text = "Fleeing from %s!" % bully.personality_name
-				coward.add_memory("Fled from a brawl!")
-				bully._release_sleep_spot()
-				bully._release_recreation_spot()
-				bully.fight = clampf(bully.fight - 15.0, 0.0, 100.0)
-				bully.purpose = clampf(bully.purpose - 8.0, 0.0, 100.0)
-				bully.state_label_text = "Intimidated rival!"
-				bully.social_cooldown = 3.0
-				return
-			branch = "BRAWL"
+			# Non-contractual escalation: the angrier NPC unilaterally attacks instead of locking both into a brawl!
+			var aggressor: NPC = self if anger >= partner.anger else partner
+			var victim: NPC = partner if aggressor == self else self
+			aggressor.start_attack(victim)
+			return
 
 	# Lock both NPCs into the synchronized conversation state
 	var duration: float = 2.4
@@ -1155,8 +1584,9 @@ func _process_active_conversation(delta: float) -> void:
 				purpose = clampf(purpose - 5.0 * delta, 0.0, 100.0)
 				_shift_affinity(social_partner, 8.0 * delta)
 			else:
-				# Awkward / one-sided chat
+				# Awkward / rejected chat -> increases Anger and Boredom!
 				talk_need = clampf(talk_need - 6.0 * delta, 0.0, 100.0)
+				anger = clampf(anger + 10.0 * intensity * delta, 0.0, 100.0)
 				boredom = clampf(boredom + 9.0 * delta, 0.0, 100.0)
 				_shift_affinity(social_partner, -4.0 * delta)
 
@@ -1165,33 +1595,25 @@ func _process_active_conversation(delta: float) -> void:
 				lust = clampf(lust - 20.0 * intensity * delta, 0.0, 100.0)
 				talk_need = clampf(talk_need - 14.0 * intensity * delta, 0.0, 100.0)
 				boredom = clampf(boredom - 15.0 * intensity * delta, 0.0, 100.0)
-				fight = clampf(fight - 8.0 * delta, 0.0, 100.0)
+				anger = clampf(anger - 8.0 * delta, 0.0, 100.0)
 				_shift_affinity(social_partner, 15.0 * delta)
 			else:
-				# REJECTED advance -> spikes Fight and Boredom!
+				# REJECTED advance -> spikes Anger and Boredom!
 				lust = clampf(lust - 5.0 * delta, 0.0, 100.0)
-				fight = clampf(fight + 14.0 * intensity * delta, 0.0, 100.0)
+				anger = clampf(anger + 14.0 * intensity * delta, 0.0, 100.0)
 				boredom = clampf(boredom + 8.0 * delta, 0.0, 100.0)
 				_shift_affinity(social_partner, -12.0 * delta)
 
 		"Heated Debate":
 			talk_need = clampf(talk_need - 14.0 * delta, 0.0, 100.0)
 			if conversation_branch == "MUTUAL":
-				fight = clampf(fight - 10.0 * delta, 0.0, 100.0)
+				anger = clampf(anger - 10.0 * delta, 0.0, 100.0)
 				purpose = clampf(purpose - 8.0 * delta, 0.0, 100.0)
 			else:
 				# Escalates hostility!
-				fight = clampf(fight + 12.0 * intensity * delta, 0.0, 100.0)
+				anger = clampf(anger + 12.0 * intensity * delta, 0.0, 100.0)
 				tired = clampf(tired + 6.0 * delta, 0.0, 100.0)
 				_shift_affinity(social_partner, -10.0 * delta)
-
-		"Jealous Drama", "Brawl":
-			# Physical brawl vents Fight rapidly, costs Health & Stamina (Tired)
-			fight = clampf(fight - 22.0 * delta, 0.0, 100.0)
-			tired = clampf(tired + 14.0 * delta, 0.0, 100.0)
-			boredom = clampf(boredom - 10.0 * delta, 0.0, 100.0)
-			health = clampf(health - (4.5 * intensity * delta), 0.0, 100.0)
-			_shift_affinity(social_partner, -20.0 * delta)
 
 	queue_redraw()
 	if conversation_timer <= 0.0:
@@ -1248,7 +1670,7 @@ func _path_towards_food(target_food: Food, _delta: float) -> void:
 	else:
 		var seek_dir = to_food.normalized()
 		# Branch: Aggressive NPCs sprint faster toward food; exhausted NPCs trudge
-		var speed_mult: float = 1.45 if fight >= 60.0 else (0.85 if tired >= 75.0 else 1.25)
+		var speed_mult: float = 1.45 if anger >= 60.0 else (0.85 if tired >= 75.0 else 1.25)
 		velocity = seek_dir * (move_speed * speed_mult)
 		var collided = move_and_slide()
 		if collided and get_slide_collision_count() > 0:
@@ -1347,6 +1769,7 @@ func die() -> void:
 		return
 	_release_sleep_spot()
 	_release_recreation_spot()
+	attack_target = null
 	is_dead = true
 	remove_from_group("npcs")
 	died.emit(self)
@@ -1355,6 +1778,7 @@ func die() -> void:
 	velocity = Vector2.ZERO
 	input_pickable = false
 	is_mouse_hovered = false
+	is_selected = false
 	collision_layer = 0
 	collision_mask = 0
 	queue_redraw()
@@ -1369,6 +1793,8 @@ func die() -> void:
 func randomize_needs() -> void:
 	_release_sleep_spot()
 	_release_recreation_spot()
+	attack_target = null
+	knockback_velocity = Vector2.ZERO
 	current_state = NPCState.WANDER
 	health = 100.0
 	hunger = randf_range(15.0, 65.0)
@@ -1378,7 +1804,7 @@ func randomize_needs() -> void:
 	boredom = randf_range(20.0, 85.0)
 	lust = randf_range(15.0, 80.0)
 	purpose = randf_range(25.0, 85.0)
-	fight = randf_range(10.0, 75.0)
+	anger = randf_range(10.0, 75.0)
 	assign_random_personality()
 	_evaluate_utility_brain()
 
@@ -1426,11 +1852,28 @@ func reset_recreation_rates_to_default(scale_mult: float = 1.0) -> void:
 # DRAWING (RADIAL BARS + SOCIAL CONNECTION LINE + STATE/PERSONALITY PILL)
 # ==============================================================================
 func _draw() -> void:
-	# 0. Draw live social connection beam if conversing/brawling with a partner
+	# 0. Draw live social connection beam if conversing with a partner
 	if current_state == NPCState.IN_CONVERSATION and is_instance_valid(social_partner) and not social_partner.is_dead:
 		var rel_partner: Vector2 = social_partner.global_position - global_position
 		draw_line(Vector2.ZERO, rel_partner * 0.5, conversation_color, 3.0, true)
 		draw_circle(rel_partner * 0.5, 4.0, conversation_color.lightened(0.3))
+
+	# 0b. Draw aggressive headbutt telegraph / charge indicator when ATTACKING
+	if current_state == NPCState.ATTACKING and is_instance_valid(attack_target) and not attack_target.is_dead:
+		var aim_dir: Vector2 = (attack_target.global_position - global_position).normalized()
+		if aim_dir != Vector2.ZERO:
+			var tip_dist: float = body_radius + (13.0 if attack_phase == AttackPhase.LUNGE else 9.0)
+			var base_dist: float = body_radius + 2.0
+			var perp: Vector2 = aim_dir.orthogonal() * 6.0
+			var tri := PackedVector2Array([
+				aim_dir * tip_dist,
+				aim_dir * base_dist + perp,
+				aim_dir * base_dist - perp
+			])
+			var charge_col: Color = Color(1.0, 0.22, 0.18, 0.95) if attack_phase == AttackPhase.LUNGE else Color(0.95, 0.35, 0.2, 0.85)
+			draw_colored_polygon(tri, charge_col)
+			if attack_phase == AttackPhase.LUNGE:
+				draw_line(-aim_dir * (body_radius + 14.0), -aim_dir * body_radius, Color(1.0, 0.35, 0.2, 0.65), 4.0, true)
 
 	# 1. Circle body
 	var active_outline: Color = Color.WHITE if is_mouse_hovered else body_outline_color
@@ -1439,10 +1882,27 @@ func _draw() -> void:
 	if is_mouse_hovered and not is_dead:
 		draw_circle(Vector2.ZERO, body_radius + 4.0, Color(1, 1, 1, 0.18))
 
-	draw_circle(Vector2.ZERO, body_radius, body_color)
-	draw_circle(Vector2.ZERO, body_radius * 0.65, body_color.lightened(0.12))
+	# Selected camera-focus reticle ring
+	if is_selected and not is_dead:
+		var pulse: float = sin(Time.get_ticks_msec() * 0.008) * 1.5
+		var sel_r: float = body_radius + 7.0 + pulse
+		var sel_col: Color = Color(0.45, 0.92, 1.0, 0.92)
+		draw_arc(Vector2.ZERO, sel_r, 0.0, TAU, 40, sel_col, 2.0, true)
+		for dir in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
+			draw_line(dir * (sel_r - 2.0), dir * (sel_r + 5.0), sel_col, 2.0, true)
 
-	if is_hungry() and not is_mouse_hovered:
+	draw_circle(Vector2.ZERO, body_radius, body_color)
+	var inner_col: Color = MALE_INNER_COLOR if gender == Gender.MALE else FEMALE_INNER_COLOR
+	draw_circle(Vector2.ZERO, body_radius * 0.68, inner_col)
+
+	if hit_flash_timer > 0.0:
+		var flash_a: float = clampf(hit_flash_timer / 0.24, 0.0, 1.0)
+		draw_circle(Vector2.ZERO, body_radius, Color(1.0, 0.3, 0.25, 0.65 * flash_a))
+		draw_arc(Vector2.ZERO, body_radius + 2.0, 0.0, TAU, 36, Color(1.0, 0.9, 0.85, flash_a), 3.0, true)
+	elif current_state == NPCState.ATTACKING and not is_mouse_hovered:
+		var attack_glow = Color(0.98, 0.18, 0.18, 0.95)
+		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, attack_glow, active_width + 1.0, true)
+	elif is_hungry() and not is_mouse_hovered:
 		var hungry_glow = Color(0.98, 0.52, 0.12, 0.85)
 		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, hungry_glow, active_width + 0.5, true)
 	elif current_state == NPCState.SLEEPING and not is_mouse_hovered:
@@ -1454,8 +1914,41 @@ func _draw() -> void:
 	else:
 		draw_arc(Vector2.ZERO, body_radius, 0.0, TAU, 36, active_outline, active_width, true)
 
-	var pip_color = Color(0.98, 0.52, 0.12) if is_hungry() else personality_tint
-	draw_circle(Vector2.ZERO, 3.5, pip_color)
+	# Numeric name centered inside the gender-colored inner circle
+	var id_font = ThemeDB.fallback_font
+	if id_font != null and npc_number > 0:
+		var id_text: String = str(npc_number)
+		var id_font_size: int = 11 if id_text.length() <= 2 else (9 if id_text.length() == 3 else 8)
+		var id_sz: Vector2 = id_font.get_string_size(id_text, HORIZONTAL_ALIGNMENT_CENTER, -1, id_font_size)
+		var ascent: float = id_font.get_ascent(id_font_size)
+		var descent: float = id_font.get_descent(id_font_size)
+		var id_pos: Vector2 = Vector2(-id_sz.x * 0.5, (ascent - descent) * 0.5)
+		draw_string(id_font, id_pos + Vector2(1.0, 1.0), id_text, HORIZONTAL_ALIGNMENT_LEFT, -1, id_font_size, Color(0.04, 0.05, 0.08, 0.85))
+		draw_string(id_font, id_pos, id_text, HORIZONTAL_ALIGNMENT_LEFT, -1, id_font_size, Color.WHITE)
+
+	# 1b. Draw headbutt impact shockwave & starburst rays at collision point
+	if impact_fx_timer > 0.0:
+		var t: float = 1.0 - clampf(impact_fx_timer / 0.24, 0.0, 1.0)
+		var alpha: float = 1.0 - t
+		var local_hit: Vector2 = to_local(impact_fx_world_pos)
+		var ring_r: float = lerpf(4.0, 22.0, t)
+		draw_arc(local_hit, ring_r, 0.0, TAU, 20, Color(1.0, 0.85, 0.35, alpha), 2.2, true)
+		for k in range(6):
+			var ang: float = (TAU * float(k) / 6.0) + 0.35
+			var ray_dir: Vector2 = Vector2.from_angle(ang)
+			draw_line(local_hit + ray_dir * (ring_r * 0.45), local_hit + ray_dir * (ring_r + 6.0), Color(1.0, 0.35, 0.2, alpha), 2.0, true)
+
+	# 1c. Draw floating chunk-damage popups (e.g. "-16")
+	if id_font != null and not floating_popups.is_empty():
+		for p in floating_popups:
+			var life_ratio: float = clampf(float(p["life"]) / float(p["max_life"]), 0.0, 1.0)
+			var txt: String = String(p["text"])
+			var col: Color = p["color"]
+			col.a = life_ratio
+			var pop_sz: Vector2 = id_font.get_string_size(txt, HORIZONTAL_ALIGNMENT_CENTER, -1, 12)
+			var pop_pos: Vector2 = (p["pos"] as Vector2) - Vector2(pop_sz.x * 0.5, 0.0)
+			draw_string(id_font, pop_pos + Vector2(1.0, 1.0), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.0, 0.0, 0.0, 0.85 * life_ratio))
+			draw_string(id_font, pop_pos, txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col)
 
 	# 2. Draw the 8 radial bars ONLY if mouse is over the NPC
 	if is_mouse_hovered and not is_dead:
@@ -1475,12 +1968,12 @@ func _draw_state_pill() -> void:
 		return
 
 	var y_offset: float = (body_radius + bar_length + 26.0) if is_mouse_hovered else (body_radius + 15.0)
-	var text: String = "[%s] %s" % [personality_name, state_label_text]
+	var text: String = "#%d [%s] %s" % [npc_number, personality_name, state_label_text]
 	var font_size: int = 9
 	var sz: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, font_size)
 	var pill_rect: Rect2 = Rect2(Vector2(-sz.x * 0.5 - 5.0, y_offset - 10.0), Vector2(sz.x + 10.0, 14.0))
 
-	var border_col: Color = conversation_color if current_state == NPCState.IN_CONVERSATION else personality_tint
+	var border_col: Color = Color(0.95, 0.22, 0.2) if current_state == NPCState.ATTACKING else (conversation_color if current_state == NPCState.IN_CONVERSATION else personality_tint)
 	draw_rect(pill_rect, Color(0.06, 0.08, 0.11, 0.88), true)
 	draw_rect(pill_rect, border_col * 0.85, false, 1.0)
 	draw_string(font, Vector2(pill_rect.position.x + 5.0, pill_rect.position.y + 10.5), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.WHITE)
@@ -1495,7 +1988,7 @@ func _draw_health_bar() -> void:
 	draw_rect(bar_rect, Color(0.06, 0.08, 0.1, 0.9), true)
 
 	var border_col: Color = Color(0.3, 0.36, 0.45, 0.9)
-	if hunger >= 100.0 or (current_state == NPCState.IN_CONVERSATION and conversation_branch == "BRAWL"):
+	if hunger >= 100.0 or current_state == NPCState.ATTACKING or hit_flash_timer > 0.0:
 		var pulse: float = sin(Time.get_ticks_msec() * 0.012) * 0.5 + 0.5
 		border_col = Color(1.0, 0.25, 0.25, 1.0).lerp(Color(0.5, 0.1, 0.1, 0.9), pulse)
 	draw_rect(bar_rect, border_col, false, 1.0)

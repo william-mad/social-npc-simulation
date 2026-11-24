@@ -1,13 +1,13 @@
-[gd_scene load_steps=7 format=3 uid="uid://cb3v3j7k0w8e4"]
+[gd_scene load_steps=8 format=3 uid="uid://cb3v3j7k0w8e4"]
 
 [ext_resource type="Script" path="res://world/world.gd" id="1_world"]
 [ext_resource type="Script" path="res://world/arena_background.gd" id="2_bg"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 content_margin_left = 12.0
-content_margin_top = 8.0
+content_margin_top = 6.0
 content_margin_right = 12.0
-content_margin_bottom = 8.0
+content_margin_bottom = 6.0
 bg_color = Color(0.08, 0.1, 0.13, 0.88)
 border_width_left = 1
 border_width_top = 1
@@ -21,9 +21,9 @@ corner_radius_bottom_left = 8
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_sleep_panel"]
 content_margin_left = 12.0
-content_margin_top = 8.0
+content_margin_top = 6.0
 content_margin_right = 12.0
-content_margin_bottom = 8.0
+content_margin_bottom = 6.0
 bg_color = Color(0.07, 0.09, 0.16, 0.9)
 border_width_left = 1
 border_width_top = 1
@@ -37,15 +37,31 @@ corner_radius_bottom_left = 8
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_rec_panel"]
 content_margin_left = 12.0
-content_margin_top = 8.0
+content_margin_top = 6.0
 content_margin_right = 12.0
-content_margin_bottom = 8.0
+content_margin_bottom = 6.0
 bg_color = Color(0.13, 0.11, 0.07, 0.9)
 border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
 border_color = Color(0.88, 0.7, 0.2, 0.92)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_gender_panel"]
+content_margin_left = 12.0
+content_margin_top = 6.0
+content_margin_right = 12.0
+content_margin_bottom = 6.0
+bg_color = Color(0.11, 0.08, 0.14, 0.9)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.68, 0.48, 0.92, 0.92)
 corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_right = 8
@@ -164,7 +180,7 @@ unique_name_in_owner = true
 layout_mode = 2
 theme_override_colors/font_color = Color(0.95, 0.4, 0.35, 1)
 theme_override_font_sizes/font_size = 12
-text = "Starved: 0"
+text = "Deaths: 0"
 
 [node name="FoodCountLabel" type="Label" parent="UI/RootControl/LeftPanelContainer/VBox/MetricsHBox"]
 unique_name_in_owner = true
@@ -474,8 +490,8 @@ text = "Clear All"
 layout_mode = 2
 theme_override_colors/font_color = Color(0.55, 0.6, 0.68, 1)
 theme_override_font_sizes/font_size = 10
-text = "• Left-Click: Place Food / Sleep / Rec (1 / 2 / 3)
-• Right-Click Drag / WASD: Pan  |  Wheel: Zoom  |  H/Tab: UI"
+text = "• Click NPC: Center/Follow (Esc/Pan to unlock)
+• Click Ground: Place Food / Sleep / Rec (1/2/3) | Wheel: Zoom"
 
 [node name="RightPanelsVBox" type="VBoxContainer" parent="UI/RootControl"]
 layout_mode = 1
@@ -488,7 +504,7 @@ offset_right = -16.0
 offset_bottom = 704.0
 grow_horizontal = 0
 mouse_filter = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 
 [node name="RightPanelContainer" type="PanelContainer" parent="UI/RootControl/RightPanelsVBox"]
 unique_name_in_owner = true
@@ -498,17 +514,20 @@ theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
 
 [node name="VBox" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer"]
 layout_mode = 2
-theme_override_constants/separation = 5
+theme_override_constants/separation = 4
 
 [node name="RightHeaderHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox"]
 layout_mode = 2
+theme_override_constants/separation = 6
 
-[node name="GrowthTitleLabel" type="Label" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/RightHeaderHBox"]
+[node name="RetractMainSlidersBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/RightHeaderHBox"]
+unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_colors/font_color = Color(0.92, 0.95, 1, 1)
-theme_override_font_sizes/font_size = 13
-text = "Passive Need Growth Rates"
+theme_override_font_sizes/font_size = 12
+text = "▾ Passive Growth (☀ Day)"
+alignment = 0
 
 [node name="CloseRightBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/RightHeaderHBox"]
 unique_name_in_owner = true
@@ -517,22 +536,64 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "✕"
 
-[node name="GrowthHintLabel" type="Label" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox"]
+[node name="MainSlidersContent" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox"]
+unique_name_in_owner = true
 layout_mode = 2
-theme_override_colors/font_color = Color(0.95, 0.7, 0.5, 1)
-theme_override_font_sizes/font_size = 11
-text = "⚠️ If Hunger hits 100, Health drains at Hunger rate until 0!"
+theme_override_constants/separation = 4
 
-[node name="MasterScaleHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox"]
+[node name="DayNightCycleHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="TimeOfDayLabel" type="Label" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/DayNightCycleHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.88, 0.45, 1)
+theme_override_font_sizes/font_size = 11
+text = "☀ DAY (20s left)"
+
+[node name="FlipDayNightBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/DayNightCycleHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "⇄ Flip"
+
+[node name="PauseCycleBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/DayNightCycleHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(28, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "⏸"
+
+[node name="DayNightTabsHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="MasterTitle" type="Label" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MasterScaleHBox"]
+[node name="EditDaySlidersBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/DayNightTabsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "● ☀ Day Sliders"
+
+[node name="EditNightSlidersBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/DayNightTabsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "☾ Night Sliders"
+
+[node name="MasterScaleHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="MasterTitle" type="Label" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/MasterScaleHBox"]
 layout_mode = 2
 theme_override_font_sizes/font_size = 12
 text = "Master Scale:"
 
-[node name="MasterScaleSlider" type="HSlider" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MasterScaleHBox"]
+[node name="MasterScaleSlider" type="HSlider" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/MasterScaleHBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
@@ -541,45 +602,59 @@ max_value = 5.0
 step = 0.1
 value = 1.0
 
-[node name="MasterScaleLabel" type="Label" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MasterScaleHBox"]
+[node name="MasterScaleLabel" type="Label" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/MasterScaleHBox"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(40, 0)
 layout_mode = 2
 theme_override_font_sizes/font_size = 12
 text = "1.0x"
 
-[node name="PresetsHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox"]
+[node name="PresetsHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent"]
 layout_mode = 2
 theme_override_constants/separation = 6
 
-[node name="FreezeGrowthBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/PresetsHBox"]
+[node name="FreezeGrowthBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/PresetsHBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 11
 text = "Freeze (0/s)"
 
-[node name="DefaultGrowthBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/PresetsHBox"]
+[node name="DefaultGrowthBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/PresetsHBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 11
 text = "All 1.0/s"
 
-[node name="FastGrowthBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/PresetsHBox"]
+[node name="FastGrowthBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent/PresetsHBox"]
 unique_name_in_owner = true
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_font_sizes/font_size = 11
 text = "All 3.0/s"
 
-[node name="HSeparator" type="HSeparator" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox"]
+[node name="HSeparator" type="HSeparator" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent"]
 layout_mode = 2
 
-[node name="NeedSlidersVBox" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox"]
+[node name="NeedSlidersVBox" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 3
+
+[node name="HSeparatorMaxEffects" type="HSeparator" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent"]
+layout_mode = 2
+
+[node name="MaxEffectsTitle" type="Label" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.96, 0.72, 0.52, 1)
+theme_override_font_sizes/font_size = 11
+text = "At Max (100) Effects:"
+
+[node name="MaxEffectsSlidersVBox" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/RightPanelContainer/VBox/MainSlidersContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 3
 
 [node name="SleepSlidersPanel" type="PanelContainer" parent="UI/RootControl/RightPanelsVBox"]
 unique_name_in_owner = true
@@ -654,7 +729,7 @@ layout_mode = 2
 [node name="SleepNeedSlidersVBox" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/SleepSlidersPanel/VBox/SleepSlidersContent"]
 unique_name_in_owner = true
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 3
 
 [node name="RecSlidersPanel" type="PanelContainer" parent="UI/RootControl/RightPanelsVBox"]
 unique_name_in_owner = true
@@ -729,7 +804,135 @@ layout_mode = 2
 [node name="RecNeedSlidersVBox" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/RecSlidersPanel/VBox/RecSlidersContent"]
 unique_name_in_owner = true
 layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="GenderPanel" type="PanelContainer" parent="UI/RootControl/RightPanelsVBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_gender_panel")
+
+[node name="VBox" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/GenderPanel"]
+layout_mode = 2
 theme_override_constants/separation = 4
+
+[node name="GenderHeaderHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="RetractGenderBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderHeaderHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.86, 0.76, 1, 1)
+theme_override_font_sizes/font_size = 12
+text = "▸ Gender Multipliers & Romance"
+alignment = 0
+
+[node name="CloseGenderBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderHeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(24, 20)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "✕"
+
+[node name="GenderContent" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="RomanceInitHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="RomanceInitLabel" type="Label" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/RomanceInitHBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.98, 0.65, 0.8, 1)
+theme_override_font_sizes/font_size = 11
+text = "Romance:"
+
+[node name="RomBothBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/RomanceInitHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "Both"
+
+[node name="RomMaleBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/RomanceInitHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "♂ Male"
+
+[node name="RomFemaleBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/RomanceInitHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "♀ Female"
+
+[node name="HSeparatorGender1" type="HSeparator" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent"]
+layout_mode = 2
+
+[node name="GenderTabsHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="EditMaleMultBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/GenderTabsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "● ♂ Male Mults"
+
+[node name="EditFemaleMultBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/GenderTabsHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "♀ Female Mults"
+
+[node name="GenderScaleHBox" type="HBoxContainer" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="GenderScaleTitle" type="Label" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/GenderScaleHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "♂ Overall:"
+
+[node name="GenderScaleSlider" type="HSlider" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/GenderScaleHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 5.0
+step = 0.1
+value = 1.0
+
+[node name="GenderScaleLabel" type="Label" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/GenderScaleHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(36, 0)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "1.0x"
+
+[node name="GenderResetBtn" type="Button" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent/GenderScaleHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "Reset"
+
+[node name="HSeparatorGender2" type="HSeparator" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent"]
+layout_mode = 2
+
+[node name="GenderNeedSlidersVBox" type="VBoxContainer" parent="UI/RootControl/RightPanelsVBox/GenderPanel/VBox/GenderContent"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 3
 
 [node name="TopControlsContainer" type="PanelContainer" parent="UI/RootControl"]
 unique_name_in_owner = true
@@ -737,16 +940,16 @@ layout_mode = 1
 anchors_preset = 5
 anchor_left = 0.5
 anchor_right = 0.5
-offset_left = -215.0
+offset_left = -210.0
 offset_top = 14.0
-offset_right = 215.0
+offset_right = 210.0
 offset_bottom = 46.0
 grow_horizontal = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_topbar")
 
 [node name="TopHBox" type="HBoxContainer" parent="UI/RootControl/TopControlsContainer"]
 layout_mode = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 alignment = 1
 
 [node name="ToggleMenuBtn" type="Button" parent="UI/RootControl/TopControlsContainer/TopHBox"]
@@ -759,7 +962,7 @@ text = "☰ Menu"
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 11
-text = "⚙ Growth"
+text = "☀ Growth"
 
 [node name="ToggleSleepSlidersBtn" type="Button" parent="UI/RootControl/TopControlsContainer/TopHBox"]
 unique_name_in_owner = true
@@ -773,8 +976,14 @@ layout_mode = 2
 theme_override_font_sizes/font_size = 11
 text = "★ Rec"
 
+[node name="ToggleGenderBtn" type="Button" parent="UI/RootControl/TopControlsContainer/TopHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "♂♀"
+
 [node name="ToggleAllUIBtn" type="Button" parent="UI/RootControl/TopControlsContainer/TopHBox"]
 unique_name_in_owner = true
 layout_mode = 2
 theme_override_font_sizes/font_size = 11
-text = "👁 UI (H)"
+text = "👁 (H)"
