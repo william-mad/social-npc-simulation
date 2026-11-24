@@ -1,0 +1,98 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://ui/npc_inspector.gd" id="1_inspector"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_inspector"]
+content_margin_left = 10.0
+content_margin_top = 6.0
+content_margin_right = 10.0
+content_margin_bottom = 6.0
+bg_color = Color(0.06, 0.1, 0.14, 0.92)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.32, 0.78, 0.95, 0.92)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="NPCInspector" type="PanelContainer"]
+visible = false
+size_flags_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_inspector")
+script = ExtResource("1_inspector")
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="HeaderHBox" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="InspectorTitleLabel" type="Label" parent="VBox/HeaderHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 12
+text = "🎯 #1 • ♂ Balanced"
+
+[node name="InspectorGenderBtn" type="Button" parent="VBox/HeaderHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "♂/♀"
+
+[node name="InspectorHealBtn" type="Button" parent="VBox/HeaderHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_font_sizes/font_size = 10
+text = "♥ Full"
+
+[node name="InspectorCloseBtn" type="Button" parent="VBox/HeaderHBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(22, 20)
+layout_mode = 2
+theme_override_font_sizes/font_size = 11
+text = "✕"
+
+[node name="InspectorStatusLabel" type="Label" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.7, 0.82, 0.92, 1)
+theme_override_font_sizes/font_size = 10
+text = "Wandering  |  HP: 100/100"
+
+[node name="TabHBox" type="HBoxContainer" parent="VBox"]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="InspectorTabStatsBtn" type="Button" parent="VBox/TabHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "● ⚔ Stats"
+
+[node name="InspectorTabMultsBtn" type="Button" parent="VBox/TabHBox"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 11
+text = "⚙ Mults"
+
+[node name="HSeparator" type="HSeparator" parent="VBox"]
+layout_mode = 2
+
+[node name="InspectorStatsVBox" type="VBoxContainer" parent="VBox"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="InspectorMultsVBox" type="VBoxContainer" parent="VBox"]
+unique_name_in_owner = true
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 3
